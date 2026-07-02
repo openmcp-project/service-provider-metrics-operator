@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -51,7 +53,10 @@ func TestMain(m *testing.M) {
 }
 
 func mustVersion() string {
-	cmd := exec.Command("./hack/common/get-version.sh")
+	_, thisFile, _, _ := runtime.Caller(0)
+	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
+	script := filepath.Join(repoRoot, "hack", "common", "get-version.sh")
+	cmd := exec.Command(script)
 	version, err := cmd.Output()
 	if err != nil {
 		panic(err)
