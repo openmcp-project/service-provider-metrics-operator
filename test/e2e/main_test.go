@@ -51,7 +51,7 @@ func TestMain(m *testing.M) {
 }
 
 func mustVersion() string {
-	cmd := exec.Command("../../hack/common/get-version.sh")
+	cmd := exec.Command("./hack/common/get-version.sh")
 	version, err := cmd.Output()
 	if err != nil {
 		panic(err)

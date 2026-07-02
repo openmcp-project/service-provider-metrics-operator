@@ -25,23 +25,9 @@ import (
 	"time"
 
 	flag "github.com/spf13/pflag"
-
-	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
-	// to ensure that exec-entrypoint and run can make use of them.
-	"github.com/openmcp-project/controller-utils/pkg/clusters"
-	crdutil "github.com/openmcp-project/controller-utils/pkg/crds"
-	"github.com/openmcp-project/controller-utils/pkg/logging"
-	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
-	"github.com/openmcp-project/openmcp-operator/api/common"
-	openmcpconst "github.com/openmcp-project/openmcp-operator/api/constants"
-	providerv1alpha1 "github.com/openmcp-project/openmcp-operator/api/provider/v1alpha1"
-	"github.com/openmcp-project/openmcp-operator/lib/clusteraccess"
-	"github.com/openmcp-project/openmcp-operator/lib/utils"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"github.com/openmcp-project/service-provider-metrics-operator/api/crds"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -54,8 +40,19 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	"github.com/openmcp-project/controller-utils/pkg/clusters"
+	crdutil "github.com/openmcp-project/controller-utils/pkg/crds"
+	"github.com/openmcp-project/controller-utils/pkg/logging"
 	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider"
 	localaccess "github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider/clusteraccess"
+	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
+	"github.com/openmcp-project/openmcp-operator/api/common"
+	openmcpconst "github.com/openmcp-project/openmcp-operator/api/constants"
+	providerv1alpha1 "github.com/openmcp-project/openmcp-operator/api/provider/v1alpha1"
+	"github.com/openmcp-project/openmcp-operator/lib/clusteraccess"
+	"github.com/openmcp-project/openmcp-operator/lib/utils"
+
+	"github.com/openmcp-project/service-provider-metrics-operator/api/crds"
 	metricsoperatorsv1alpha1 "github.com/openmcp-project/service-provider-metrics-operator/api/v1alpha1"
 	"github.com/openmcp-project/service-provider-metrics-operator/internal/controller"
 	// +kubebuilder:scaffold:imports
