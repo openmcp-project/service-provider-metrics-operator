@@ -1,4 +1,4 @@
-module github.com/openmcp-project/service-provider-template
+module github.com/openmcp-project/service-provider-metrics-operator
 
 go 1.26.4
 

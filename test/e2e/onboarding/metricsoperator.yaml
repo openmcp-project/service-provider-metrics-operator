@@ -1,6 +1,6 @@
 apiVersion: metrics.services.open-control-plane.io/v1alpha1
-kind: ProviderConfig
+kind: MetricsOperator
 metadata:
-  name: metricsoperator
+  name: test-mcp
 spec:
-  pollInterval: 1m
+  foo: bar

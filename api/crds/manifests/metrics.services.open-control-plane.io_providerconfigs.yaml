@@ -6,9 +6,9 @@ metadata:
     controller-gen.kubebuilder.io/version: v0.18.0
   labels:
     openmcp.cloud/cluster: platform
-  name: providerconfigs.{{.Group}}.{{.GroupSuffix}}
+  name: providerconfigs.metrics.services.open-control-plane.io
 spec:
-  group: {{.Group}}.{{.GroupSuffix}}
+  group: metrics.services.open-control-plane.io
   names:
     kind: ProviderConfig
     listKind: ProviderConfigList

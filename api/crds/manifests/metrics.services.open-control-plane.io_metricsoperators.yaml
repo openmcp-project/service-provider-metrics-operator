@@ -6,14 +6,14 @@ metadata:
     controller-gen.kubebuilder.io/version: v0.18.0
   labels:
     openmcp.cloud/cluster: onboarding
-  name: {{.KindLower}}s.{{.Group}}.{{.GroupSuffix}}
+  name: metricsoperators.metrics.services.open-control-plane.io
 spec:
-  group: {{.Group}}.{{.GroupSuffix}}
+  group: metrics.services.open-control-plane.io
   names:
-    kind: {{.Kind}}
-    listKind: {{.Kind}}List
-    plural: {{.KindLower}}s
-    singular: {{.KindLower}}
+    kind: MetricsOperator
+    listKind: MetricsOperatorList
+    plural: metricsoperators
+    singular: metricsoperator
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -26,7 +26,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: {{.Kind}} is the Schema for the {{.KindLower}}s API
+        description: MetricsOperator is the Schema for the metricsoperators API
         properties:
           apiVersion:
             description: |-
@@ -46,19 +46,19 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of {{.Kind}}
+            description: spec defines the desired state of MetricsOperator
             properties:
               foo:
-                description: foo is an example field of {{.Kind}}. Edit {{.KindLower}}_types.go
+                description: foo is an example field of MetricsOperator. Edit metricsoperator_types.go
                   to remove/update
                 type: string
             type: object
           status:
-            description: status defines the observed state of {{.Kind}}
+            description: status defines the observed state of MetricsOperator
             properties:
               conditions:
                 description: |-
-                  conditions represent the current state of the {{.Kind}} resource.
+                  conditions represent the current state of the MetricsOperator resource.
                   Each condition has a unique type and reflects the status of a specific aspect of the resource.
 
                   Standard condition types include:
