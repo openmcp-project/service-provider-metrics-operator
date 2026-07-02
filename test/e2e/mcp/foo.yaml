@@ -1,0 +1,6 @@
+apiVersion: example.domain/v1alpha1
+kind: Foo
+metadata:
+  name: dummy
+spec:
+  foo: bar

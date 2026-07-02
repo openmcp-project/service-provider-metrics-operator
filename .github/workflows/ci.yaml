@@ -1,0 +1,18 @@
+name: CI
+
+on:
+  push:
+    tags:
+      - v*
+    branches:
+      - master
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build_validate_test:
+    uses: openmcp-project/build/.github/workflows/ci.lib.yaml@b3bfce9507f77f6f62c769634cb8da1da64177a1 # main
+    secrets: inherit
