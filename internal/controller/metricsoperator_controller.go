@@ -18,22 +18,31 @@ package controller
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"reflect"
+	"strings"
 	"time"
 
+	libutils "github.com/openmcp-project/openmcp-operator/lib/utils"
 	corev1 "k8s.io/api/core/v1"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
+	ctrlerrors "github.com/openmcp-project/controller-utils/pkg/errors"
 	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider"
 	clusteraccess "github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider/clusteraccess"
 
 	apiv1alpha1 "github.com/openmcp-project/service-provider-metrics-operator/api/v1alpha1"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator"
 )
+
+const conditionReasonError = "ReconcileError"
+
+// ErrManagedResources is an end-user facing error if errors are present inside ExternalSecretsOperator.Status.ManagedResources
+var ErrManagedResources = errors.New("resources contain reconcile errors")
 
 // MetricsOperatorReconciler reconciles a MetricsOperator object
 type MetricsOperatorReconciler struct {
@@ -46,41 +55,155 @@ type MetricsOperatorReconciler struct {
 }
 
 // CreateOrUpdate is called on every add or update event
-func (r *MetricsOperatorReconciler) CreateOrUpdate(ctx context.Context, svcobj *apiv1alpha1.MetricsOperator, _ *apiv1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (ctrl.Result, error) {
-	l := logf.FromContext(ctx)
-	serviceprovider.StatusProgressing(svcobj, "Reconciling", "Reconcile in progress")
-	managedObj := &apiextensionsv1.CustomResourceDefinition{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "foos.example.domain",
-		},
+func (r *MetricsOperatorReconciler) CreateOrUpdate(ctx context.Context, obj *apiv1alpha1.MetricsOperator, pc *apiv1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (ctrl.Result, error) {
+	serviceprovider.StatusProgressing(obj, "Reconciling", "Reconcile in progress")
+	mgr, err := r.createObjectManager(obj, pc, clusters)
+	if err != nil {
+		serviceprovider.StatusProgressing(obj, conditionReasonError, err.Error())
+		return ctrl.Result{}, ctrlerrors.IgnoreInvalidUserInput(err)
 	}
-	if _, err := ctrl.CreateOrUpdate(ctx, clusters.MCPCluster.Client(), managedObj, func() error {
-		managedObj.Spec = fooCRD().Spec
-		return nil
-	}); err != nil {
-		l.Error(err, "createOrUpdate failed")
-		return ctrl.Result{}, err
+	results, err := mgr.Apply(ctx)
+	managedResources, resultContainsErrors := resultsToResources(ctx, results)
+	obj.Status.Resources = managedResources
+	if allResourcesReady(managedResources) {
+		serviceprovider.StatusReady(obj)
 	}
-	serviceprovider.StatusReady(svcobj)
+	if resultContainsErrors || err != nil {
+		return ctrl.Result{}, updateStatusError(obj, resultContainsErrors, err)
+	}
 	return ctrl.Result{}, nil
 }
 
 // Delete is called on every delete event
-func (r *MetricsOperatorReconciler) Delete(ctx context.Context, obj *apiv1alpha1.MetricsOperator, _ *apiv1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (ctrl.Result, error) {
-	l := logf.FromContext(ctx)
+func (r *MetricsOperatorReconciler) Delete(ctx context.Context, obj *apiv1alpha1.MetricsOperator, pc *apiv1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (ctrl.Result, error) {
 	serviceprovider.StatusTerminating(obj)
-	managedObj := fooCRD()
-	if err := clusters.MCPCluster.Client().Delete(ctx, managedObj); client.IgnoreNotFound(err) != nil {
-		l.Error(err, "delete object failed")
-		return ctrl.Result{}, err
+	mgr, err := r.createObjectManager(obj, pc, clusters)
+	if err != nil {
+		serviceprovider.StatusProgressing(obj, conditionReasonError, err.Error())
+		return ctrl.Result{}, ctrlerrors.IgnoreInvalidUserInput(err)
 	}
-	if err := clusters.MCPCluster.Client().Get(ctx, client.ObjectKeyFromObject(managedObj), managedObj); err != nil {
-		return reconcile.Result{}, client.IgnoreNotFound(err)
+	results, err := mgr.Delete(ctx)
+	managedResources, resultContainsErrors := resultsToResources(ctx, results)
+	obj.Status.Resources = managedResources
+	if metricsoperator.AllDeleted(results) {
+		return ctrl.Result{}, nil
 	}
-	// object still exists
+	if resultContainsErrors || err != nil {
+		return ctrl.Result{}, updateStatusError(obj, resultContainsErrors, err)
+	}
 	return ctrl.Result{
-		RequeueAfter: time.Second * 10,
+		RequeueAfter: time.Second * 5,
 	}, nil
+}
+
+func updateStatusError(obj *apiv1alpha1.MetricsOperator, resourceErrors bool, err error) error {
+	if resourceErrors {
+		err = errors.Join(ErrManagedResources, err)
+	}
+	serviceprovider.StatusProgressing(obj, conditionReasonError, userErrorMessage(err))
+	return ctrlerrors.IgnoreInvalidUserInput(err)
+}
+
+// userErrorMessage constructs an end-user facing error message.
+// Only end-user errors are processed.
+func userErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	errorMessages := []string{}
+	if errors.Is(err, ErrManagedResources) {
+		errorMessages = append(errorMessages, ErrManagedResources.Error())
+	}
+	if errors.Is(err, metricsoperator.ErrOrphanCleanup) {
+		errorMessages = append(errorMessages, metricsoperator.ErrOrphanCleanup.Error())
+	}
+	return strings.Join(errorMessages, "; ")
+}
+
+func (r *MetricsOperatorReconciler) createObjectManager(obj *apiv1alpha1.MetricsOperator, pc *apiv1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (metricsoperator.Manager, error) {
+	tenantNamespace, err := libutils.StableMCPNamespace(obj.Name, obj.Namespace)
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine tenant namespace for external secrets deployment: %w", err)
+	}
+	// select the requested version from the provider config
+	esoVersion, err := selectMetricsOperatorVersion(obj.Spec.Version, pc)
+	if err != nil {
+		return nil, err
+	}
+	helmValues, err := metricsoperator.ExtractHelmValues(esoVersion.HelmValues)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract helm values: %w", err)
+	}
+	platformCluster := metricsoperator.NewManagedCluster(r.PlatformCluster, r.PlatformCluster.RESTConfig(), tenantNamespace, metricsoperator.PlatformCluster)
+	externalSecretsNamespace := metricsoperator.DefaultNamespace
+	if helmValues.NamespaceOverride != "" {
+		externalSecretsNamespace = helmValues.NamespaceOverride
+	}
+	mcpCluster := metricsoperator.NewManagedCluster(clusters.MCPCluster, clusters.MCPCluster.RESTConfig(), externalSecretsNamespace, metricsoperator.ManagedControlPlane)
+
+	metricsoperator.ManageFluxResources(metricsoperator.ManageFluxResourcesParams{
+		Cluster:          platformCluster,
+		MCPNamespace:     externalSecretsNamespace,
+		Obj:              obj,
+		Interval:         pc.PollInterval(),
+		ClusterContext:   clusters,
+		RequestedVersion: esoVersion,
+	})
+	mgr := metricsoperator.NewManager()
+	mgr.AddCluster(mcpCluster)
+	mgr.AddCluster(platformCluster)
+
+	return mgr, nil
+}
+
+func selectMetricsOperatorVersion(requestedVersion string, pc *apiv1alpha1.ProviderConfig) (apiv1alpha1.MetricsOperatorVersion, error) {
+	for _, configVersion := range pc.Spec.Versions {
+		if configVersion.Version == requestedVersion {
+			return configVersion, nil
+		}
+	}
+	return apiv1alpha1.MetricsOperatorVersion{}, fmt.Errorf("%w: requested version (%s) is not available", ctrlerrors.ErrInvalidUserInput, requestedVersion)
+}
+
+func resultsToResources(ctx context.Context, results []metricsoperator.Result) ([]apiv1alpha1.ManagedResource, bool) {
+	l := log.FromContext(ctx)
+	containsError := false
+	resources := make([]apiv1alpha1.ManagedResource, 0, len(results))
+	for _, res := range results {
+		obj := res.Object.GetObject()
+		status := res.Object.GetStatus(apiv1alpha1.ResourceLocation(res.Cluster.GetClusterType()))
+		resources = append(resources, apiv1alpha1.ManagedResource{
+			TypedObjectReference: corev1.TypedObjectReference{
+				Kind:      reflect.TypeOf(obj).Elem().Name(),
+				Name:      obj.GetName(),
+				Namespace: nilIfEmptyString(obj.GetNamespace()),
+			},
+			Phase:    status.Phase,
+			Message:  status.Message,
+			Location: status.Location,
+		})
+		if res.Error != nil {
+			containsError = true
+			l.Error(res.Error, "objectID", metricsoperator.ObjectID(obj))
+		}
+	}
+	return resources, containsError
+}
+
+func nilIfEmptyString(str string) *string {
+	if str == "" {
+		return nil
+	}
+	return ptr.To(str)
+}
+
+func allResourcesReady(resources []apiv1alpha1.ManagedResource) bool {
+	for _, res := range resources {
+		if res.Phase != apiv1alpha1.Ready {
+			return false
+		}
+	}
+	return true
 }
 
 // IsReferencedSecret returns true if the given secret should trigger
@@ -98,42 +221,4 @@ func (r *MetricsOperatorReconciler) IsReferencedSecret(ctx context.Context, secr
 	//     }
 	// }
 	return false
-}
-
-func fooCRD() *apiextensionsv1.CustomResourceDefinition {
-	return &apiextensionsv1.CustomResourceDefinition{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "foos.example.domain",
-		},
-		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
-			Group: "example.domain",
-			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
-				{
-					Name:    "v1alpha1",
-					Served:  true,
-					Storage: true,
-					Schema: &apiextensionsv1.CustomResourceValidation{
-						OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
-							Type: "object",
-							Properties: map[string]apiextensionsv1.JSONSchemaProps{
-								"spec": {
-									Type: "object",
-									Properties: map[string]apiextensionsv1.JSONSchemaProps{
-										"foo": {Type: "string"},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-			Scope: apiextensionsv1.NamespaceScoped,
-			Names: apiextensionsv1.CustomResourceDefinitionNames{
-				Plural:   "foos",
-				Singular: "foo",
-				Kind:     "Foo",
-				ListKind: "FooList",
-			},
-		},
-	}
 }

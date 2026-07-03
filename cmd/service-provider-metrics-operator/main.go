@@ -24,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	flag "github.com/spf13/pflag"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -82,6 +84,8 @@ func initPlatformScheme() {
 	utilruntime.Must(metricsoperatorsv1alpha1.AddToScheme(platformScheme))
 	utilruntime.Must(clustersv1alpha1.AddToScheme(platformScheme))
 	utilruntime.Must(providerv1alpha1.AddToScheme(platformScheme))
+	utilruntime.Must(sourcev1.AddToScheme(platformScheme))
+	utilruntime.Must(helmv2.AddToScheme(platformScheme))
 }
 
 func initOnboardingScheme() {
@@ -414,6 +418,7 @@ func main() {
 			PodNamespace:      podNamespace,
 		}).
 		AdvancedClusterAccessReconciler(clusterAccessReconciler).
+		WorkloadCluster(true).
 		MustBuild()
 	if err := spr.SetupWithManager(mgr, "metricsoperator", providerConfigUpdates); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MetricsOperator")

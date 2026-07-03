@@ -4,3 +4,6 @@ metadata:
   name: metricsoperator
 spec:
   pollInterval: 1m
+  versions:
+    - version: "v0.11.3"
+      chartVersion: "v0.11.3"
