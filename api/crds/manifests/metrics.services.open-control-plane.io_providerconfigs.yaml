@@ -42,7 +42,7 @@ spec:
             description: spec defines the desired state of ProviderConfig
             properties:
               pollInterval:
-                default: 1m
+                default: 1h
                 description: PollInterval at which the controller requeues to detect
                   drift
                 format: duration

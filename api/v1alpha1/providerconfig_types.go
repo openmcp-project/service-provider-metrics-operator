@@ -35,7 +35,7 @@ type ProviderConfigSpec struct {
 
 	// PollInterval at which the controller requeues to detect drift
 	// +optional
-	// +kubebuilder:default:="1m"
+	// +kubebuilder:default:="1h"
 	// +kubebuilder:validation:Format=duration
 	PollInterval *metav1.Duration `json:"pollInterval,omitempty"`
 }
@@ -128,7 +128,7 @@ func init() {
 // PollInterval returns the poll interval duration from the spec.
 func (o *ProviderConfig) PollInterval() time.Duration {
 	if o.Spec.PollInterval == nil {
-		return 60 * time.Minute
+		return time.Hour
 	}
 	return o.Spec.PollInterval.Duration
 }
