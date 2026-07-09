@@ -25,6 +25,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -45,11 +46,11 @@ var ErrManagedResources = errors.New("resources contain reconcile errors")
 
 // MetricsOperatorReconciler reconciles a MetricsOperator object
 type MetricsOperatorReconciler struct {
-	// OnboardingCluster is the cluster where this controller watches MetricsOperator resources.
+	// OnboardingCluster is the cluster where this controller watches MetricsOperator resources and reacts to their changes.
 	OnboardingCluster *clusters.Cluster
 	// PlatformCluster is the cluster where this controller is deployed and configured.
 	PlatformCluster *clusters.Cluster
-	// PodNamespace is the namespace where this controller is deployed.
+	// PodNamespace is the namespace where this controller is deployed in.
 	PodNamespace string
 }
 
@@ -94,8 +95,6 @@ func (r *MetricsOperatorReconciler) Delete(ctx context.Context, obj *apiv1alpha1
 }
 
 // IsReferencedSecret returns true if the given secret should trigger reconciliation.
-//
-//revive:disable:unused-parameter
 func (r *MetricsOperatorReconciler) IsReferencedSecret(ctx context.Context, secret *corev1.Secret, pc *apiv1alpha1.ProviderConfig) bool {
 	if pc == nil {
 		return false
@@ -138,8 +137,30 @@ func (r *MetricsOperatorReconciler) createObjectManager(obj *apiv1alpha1.Metrics
 		metricsNamespace = helmValues.NamespaceOverride
 	}
 
+	mcpCluster := metricsoperator.NewManagedCluster(clusterCtx.MCPCluster, clusterCtx.MCPCluster.RESTConfig(), metricsNamespace, metricsoperator.ClusterTypeManagedControlPlane)
+
+	// ServiceAccount on MCP + token Secret on workload cluster so --install-crds connects to MCP.
+	mcpSA := &metricsoperator.ManagedServiceAccount{
+		NamespacedName: k8stypes.NamespacedName{
+			Name:      "metrics-operator-server",
+			Namespace: metricsNamespace,
+		},
+	}
+
 	// Workload cluster: used to sync image pull secrets so Flux can pull the chart image.
 	workloadCluster := metricsoperator.NewManagedCluster(clusterCtx.WorkloadCluster, clusterCtx.WorkloadCluster.RESTConfig(), metricsNamespace, metricsoperator.ClusterTypeWorkload)
+
+	mcpSA.Configure(workloadCluster, mcpCluster, pc.PollInterval())
+	metricsoperator.ConfigureAuthz(mcpCluster, mcpSA)
+
+	version.HelmValues, err = metricsoperator.AddAuthToHelmValues(version.HelmValues, mcpCluster, mcpSA)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inject MCP auth into helm values: %w", err)
+	}
+	version.HelmValues, err = metricsoperator.AddDefaultHelmValues(version.HelmValues, metricsNamespace)
+	if err != nil {
+		return nil, fmt.Errorf("failed to set default helm values: %w", err)
+	}
 
 	// Sync image pull secrets to workload cluster (metrics-operator namespace).
 	for _, imagePullSecret := range helmValues.ImagePullSecrets {
@@ -177,6 +198,7 @@ func (r *MetricsOperatorReconciler) createObjectManager(obj *apiv1alpha1.Metrics
 	})
 
 	mgr := metricsoperator.NewManager()
+	mgr.AddCluster(mcpCluster)
 	mgr.AddCluster(workloadCluster)
 	mgr.AddCluster(platformCluster)
 
