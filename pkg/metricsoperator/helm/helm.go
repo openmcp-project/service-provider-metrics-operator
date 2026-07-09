@@ -9,10 +9,20 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 )
 
+const (
+	serviceAccountMountPath = "/var/run/secrets/kubernetes.io/serviceaccount"
+	serviceAccountVolume    = "kube-api-access"
+)
+
 // HelmValues define the helm values that are explicitly processed during reconciliation
 type HelmValues struct {
-	NamespaceOverride string                        `json:"namespaceOverride,omitempty"`
-	ImagePullSecrets  []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
+	NamespaceOverride string `json:"namespaceOverride,omitempty"`
+	Global            Global `json:"global,omitempty"`
+}
+
+// Global define the global settings that are explicitly process during reconciliation
+type Global struct {
+	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
 }
 
 // ExtractHelmValues extract helm values required for processing
@@ -29,8 +39,7 @@ func ExtractHelmValues(values *apiextensionsv1.JSON) (*HelmValues, error) {
 	return vals, nil
 }
 
-// AddDefaultHelmValues sets helm values that are required for the MCP deployment:
-// disables SA creation, webhooks, and sets configNamespace.
+// AddDefaultHelmValues sets helm values that are required for the MCP deployment
 func AddDefaultHelmValues(values *apiextensionsv1.JSON, mcpNamespace string) (*apiextensionsv1.JSON, error) {
 	root, err := unmarshalRoot(values)
 	if err != nil {
@@ -40,7 +49,10 @@ func AddDefaultHelmValues(values *apiextensionsv1.JSON, mcpNamespace string) (*a
 	if root["configNamespace"], err = json.Marshal(mcpNamespace); err != nil {
 		return nil, err
 	}
-	if root["serviceAccount"], err = json.Marshal(map[string]any{"create": false, "automount": false}); err != nil {
+	if root["serviceAccount"], err = json.Marshal(map[string]any{
+		"create":    false,
+		"automount": false,
+	}); err != nil {
 		return nil, err
 	}
 	if root["webhooks"], err = json.Marshal(map[string]any{
@@ -113,11 +125,6 @@ func AddAuthToHelmValues(values *apiextensionsv1.JSON, remoteCluster resources.M
 	}
 	return &apiextensionsv1.JSON{Raw: out}, nil
 }
-
-const (
-	serviceAccountMountPath = "/var/run/secrets/kubernetes.io/serviceaccount"
-	serviceAccountVolume    = "kube-api-access"
-)
 
 func unmarshalRoot(values *apiextensionsv1.JSON) (map[string]json.RawMessage, error) {
 	root := map[string]json.RawMessage{}

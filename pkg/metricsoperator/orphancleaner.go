@@ -31,6 +31,10 @@ type cleanerType[T client.ObjectList] struct {
 	ObjectsToKeep []corev1.LocalObjectReference
 	EmptyList     func() T
 	// PreDeletionSteps is an optional hook that is invoked before OrphanCleaner.Cleanup deletes an object.
+	// It returns:
+	//   - proceedWithDeletion: true if the object is ready to be deleted.
+	//     Returning false prevents deletion for this reconciliation cycle.
+	//   - err: an error if the preparation step failed.
 	PreDeletionSteps func(context.Context, client.Object) (proceedWithDeletion bool, _ error)
 }
 

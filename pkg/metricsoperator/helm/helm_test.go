@@ -29,7 +29,9 @@ func TestExtractHelmValues(t *testing.T) {
 				Raw: []byte(`{"imagePullSecrets": [{"name": "my-secret"}]}`),
 			},
 			want: &HelmValues{
-				ImagePullSecrets: []corev1.LocalObjectReference{{Name: "my-secret"}},
+				Global: Global{
+					ImagePullSecrets: []corev1.LocalObjectReference{{Name: "my-secret"}},
+				},
 			},
 			wantErr: false,
 		},

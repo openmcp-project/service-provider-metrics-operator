@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/meta"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/objectutils"
@@ -82,7 +81,7 @@ func (m *managerImpl) reconcileObjects(ctx context.Context, isDeletion bool) ([]
 		if err != nil {
 			return results, err
 		}
-		results = slices.Concat(results, result)
+		results = append(results, result...)
 	}
 	return results, nil
 }

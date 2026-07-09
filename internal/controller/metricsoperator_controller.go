@@ -135,6 +135,7 @@ func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj
 		return nil, err
 	}
 
+	// select the requested version from the provider config
 	moVersion, err := selectMetricsOperatorVersion(obj.Spec.Version, pc)
 	if err != nil {
 		return nil, err
@@ -148,16 +149,17 @@ func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj
 	workloadCluster := resources.NewManagedCluster(clusters.WorkloadCluster, clusters.WorkloadCluster.RESTConfig(), instance.Namespace(obj), resources.WorkloadCluster)
 	mcpCluster := resources.NewManagedCluster(clusters.MCPCluster, clusters.MCPCluster.RESTConfig(), metricsoperator.DefaultNamespace, resources.ManagedControlPlane)
 
-	metricsNamespace := metricsoperator.DefaultNamespace
+	metricsNamespace := mcpCluster.GetDefaultNamespace()
 	if helmValues.NamespaceOverride != "" {
 		metricsNamespace = helmValues.NamespaceOverride
 	}
 
+	// ### MCP RESOURCES ###
 	// ServiceAccount on MCP + token Secret on workload cluster so --install-crds connects to MCP.
 	mcpServiceAccount := &authn.ManagedServiceAccount{
 		NamespacedName: k8stypes.NamespacedName{
 			Name:      "metrics-operator-server",
-			Namespace: mcpCluster.GetDefaultNamespace(),
+			Namespace: metricsNamespace,
 		},
 	}
 
@@ -197,12 +199,21 @@ func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj
 	platformSecretCleaner := metricsoperator.NewSecretCleaner(platformCluster, tenantNamespace, []corev1.LocalObjectReference{
 		{Name: prefixedChartPullSecret},
 	})
-	workloadSecretCleaner := metricsoperator.NewSecretCleaner(workloadCluster, metricsNamespace, helmValues.ImagePullSecrets)
+	workloadSecretCleaner := metricsoperator.NewSecretCleaner(workloadCluster, metricsNamespace, helmValues.Global.ImagePullSecrets)
 
 	mgr.AddCleaner(platformSecretCleaner)
 	mgr.AddCleaner(workloadSecretCleaner)
 
 	return mgr, nil
+}
+
+func selectMetricsOperatorVersion(requestedVersion string, pc *apiv1alpha1.ProviderConfig) (apiv1alpha1.MetricsOperatorVersion, error) {
+	for _, v := range pc.Spec.Versions {
+		if v.Version == requestedVersion {
+			return v, nil
+		}
+	}
+	return apiv1alpha1.MetricsOperatorVersion{}, fmt.Errorf("%w: requested version (%s) is not available", ctrlerrors.ErrInvalidUserInput, requestedVersion)
 }
 
 func resultsToResources(ctx context.Context, results []resources.Result) ([]apiv1alpha1.ManagedResource, bool) {
@@ -238,8 +249,8 @@ func nilIfEmptyString(str string) *string {
 }
 
 func allResourcesReady(resources []apiv1alpha1.ManagedResource) bool {
-	for _, r := range resources {
-		if r.Phase != apiv1alpha1.Ready {
+	for _, res := range resources {
+		if res.Phase != apiv1alpha1.Ready {
 			return false
 		}
 	}
@@ -259,7 +270,7 @@ func (r *MetricsOperatorReconciler) IsReferencedSecret(_ context.Context, secret
 		if err != nil {
 			continue
 		}
-		for _, ref := range helmValues.ImagePullSecrets {
+		for _, ref := range helmValues.Global.ImagePullSecrets {
 			if ref.Name == secret.Name {
 				return true
 			}
@@ -275,7 +286,7 @@ func (r *MetricsOperatorReconciler) managePullSecrets(
 	version apiv1alpha1.MetricsOperatorVersion,
 	tenantNamespace, metricsNamespace string,
 ) (string, error) {
-	metricsoperator.ManagePullSecrets(workloadCluster, helmValues.ImagePullSecrets, metricsoperator.SecretCopyConfig{
+	metricsoperator.ManagePullSecrets(workloadCluster, helmValues.Global.ImagePullSecrets, metricsoperator.SecretCopyConfig{
 		SourceClient:    platformCluster.GetClient(),
 		SourceNamespace: r.PodNamespace,
 		TargetNamespace: metricsNamespace,
@@ -304,13 +315,4 @@ func (r *MetricsOperatorReconciler) ensureInstanceID(ctx context.Context, obj *a
 		}
 	}
 	return nil
-}
-
-func selectMetricsOperatorVersion(requestedVersion string, pc *apiv1alpha1.ProviderConfig) (apiv1alpha1.MetricsOperatorVersion, error) {
-	for _, v := range pc.Spec.Versions {
-		if v.Version == requestedVersion {
-			return v, nil
-		}
-	}
-	return apiv1alpha1.MetricsOperatorVersion{}, fmt.Errorf("%w: requested version (%s) is not available", ctrlerrors.ErrInvalidUserInput, requestedVersion)
 }
