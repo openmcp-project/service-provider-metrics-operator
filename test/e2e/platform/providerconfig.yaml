@@ -3,7 +3,7 @@ kind: ProviderConfig
 metadata:
   name: metricsoperator
 spec:
-  pollInterval: 10s
+  pollInterval: 60m
   versions:
     - version: "v0.11.1"
       chartVersion: "v0.11.1"

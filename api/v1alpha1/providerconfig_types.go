@@ -128,7 +128,7 @@ func init() {
 // PollInterval returns the poll interval duration from the spec.
 func (o *ProviderConfig) PollInterval() time.Duration {
 	if o.Spec.PollInterval == nil {
-		return time.Minute
+		return 60 * time.Minute
 	}
 	return o.Spec.PollInterval.Duration
 }
