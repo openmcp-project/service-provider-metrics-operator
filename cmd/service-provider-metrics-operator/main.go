@@ -24,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	v2 "github.com/fluxcd/helm-controller/api/v2"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	flag "github.com/spf13/pflag"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -82,6 +84,8 @@ func initPlatformScheme() {
 	utilruntime.Must(metricsoperatorsv1alpha1.AddToScheme(platformScheme))
 	utilruntime.Must(clustersv1alpha1.AddToScheme(platformScheme))
 	utilruntime.Must(providerv1alpha1.AddToScheme(platformScheme))
+	utilruntime.Must(sourcev1.AddToScheme(platformScheme))
+	utilruntime.Must(v2.AddToScheme(platformScheme))
 }
 
 func initOnboardingScheme() {
@@ -115,7 +119,7 @@ func main() {
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&environment, "environment", "", "Name of the environment")
-	flag.StringVar(&providerName, "provider-name", "", "Name of the provider resource")
+	flag.StringVar(&providerName, "provider-name", "service-provider-metrics-operator", "Name of the provider resource")
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -414,6 +418,7 @@ func main() {
 			PodNamespace:      podNamespace,
 		}).
 		AdvancedClusterAccessReconciler(clusterAccessReconciler).
+		WorkloadCluster(true).
 		MustBuild()
 	if err := spr.SetupWithManager(mgr, "metricsoperator", providerConfigUpdates); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MetricsOperator")
