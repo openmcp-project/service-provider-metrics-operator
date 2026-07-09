@@ -1,4 +1,4 @@
-package metricsoperator
+package resources
 
 import (
 	"context"
@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/meta"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/objectutils"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -138,7 +140,7 @@ func (m *managerImpl) reconcileObject(ctx context.Context, mc ManagedCluster, mo
 	}
 
 	opResult, err := controllerutil.CreateOrUpdate(ctx, client, obj, func() error {
-		SetManagedBy(obj)
+		meta.SetManagedBy(obj)
 		return mo.Reconcile(ctx)
 	})
 	return Result{
@@ -165,7 +167,7 @@ func (m *managerImpl) checkForDependents(ctx context.Context, deps []dependency)
 		}
 		// No error occurred, the GET request has been successful.
 		// The object still exists and depends on us.
-		errs = append(errs, fmt.Errorf("dependent object still exists: %s", ObjectID(obj)))
+		errs = append(errs, fmt.Errorf("dependent object still exists: %s", objectutils.ObjectID(obj)))
 	}
 	return errors.Join(errs...)
 }

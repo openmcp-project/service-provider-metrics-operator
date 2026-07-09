@@ -26,6 +26,7 @@ import (
 
 	libutils "github.com/openmcp-project/openmcp-operator/lib/utils"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -37,6 +38,12 @@ import (
 
 	apiv1alpha1 "github.com/openmcp-project/service-provider-metrics-operator/api/v1alpha1"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/authn"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/authz"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/helm"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/instance"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/objectutils"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/resources"
 )
 
 const conditionReasonError = "ReconcileError"
@@ -57,7 +64,7 @@ type MetricsOperatorReconciler struct {
 // CreateOrUpdate is called on every add or update event
 func (r *MetricsOperatorReconciler) CreateOrUpdate(ctx context.Context, obj *apiv1alpha1.MetricsOperator, pc *apiv1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (ctrl.Result, error) {
 	serviceprovider.StatusProgressing(obj, "Reconciling", "Reconcile in progress")
-	mgr, err := r.createObjectManager(obj, pc, clusters)
+	mgr, err := r.createObjectManager(ctx, obj, pc, clusters)
 	if err != nil {
 		serviceprovider.StatusProgressing(obj, conditionReasonError, err.Error())
 		return ctrl.Result{}, ctrlerrors.IgnoreInvalidUserInput(err)
@@ -77,7 +84,7 @@ func (r *MetricsOperatorReconciler) CreateOrUpdate(ctx context.Context, obj *api
 // Delete is called on every delete event
 func (r *MetricsOperatorReconciler) Delete(ctx context.Context, obj *apiv1alpha1.MetricsOperator, pc *apiv1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (ctrl.Result, error) {
 	serviceprovider.StatusTerminating(obj)
-	mgr, err := r.createObjectManager(obj, pc, clusters)
+	mgr, err := r.createObjectManager(ctx, obj, pc, clusters)
 	if err != nil {
 		serviceprovider.StatusProgressing(obj, conditionReasonError, err.Error())
 		return ctrl.Result{}, ctrlerrors.IgnoreInvalidUserInput(err)
@@ -85,7 +92,7 @@ func (r *MetricsOperatorReconciler) Delete(ctx context.Context, obj *apiv1alpha1
 	results, err := mgr.Delete(ctx)
 	managedResources, resultContainsErrors := resultsToResources(ctx, results)
 	obj.Status.Resources = managedResources
-	if metricsoperator.AllDeleted(results) {
+	if resources.AllDeleted(results) {
 		return ctrl.Result{}, nil
 	}
 	if resultContainsErrors || err != nil {
@@ -120,37 +127,58 @@ func userErrorMessage(err error) string {
 	return strings.Join(errorMessages, "; ")
 }
 
-func (r *MetricsOperatorReconciler) createObjectManager(obj *apiv1alpha1.MetricsOperator, pc *apiv1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (metricsoperator.Manager, error) {
+func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj *apiv1alpha1.MetricsOperator, pc *apiv1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (resources.Manager, error) {
 	tenantNamespace, err := libutils.StableMCPNamespace(obj.Name, obj.Namespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine tenant namespace for external secrets deployment: %w", err)
 	}
-	// select the requested version from the provider config
-	esoVersion, err := selectMetricsOperatorVersion(obj.Spec.Version, pc)
+	err = r.ensureInstanceID(ctx, obj)
 	if err != nil {
 		return nil, err
 	}
-	helmValues, err := metricsoperator.ExtractHelmValues(esoVersion.HelmValues)
+	// select the requested version from the provider config
+	moVersion, err := selectMetricsOperatorVersion(obj.Spec.Version, pc)
 	if err != nil {
-		return nil, fmt.Errorf("failed to extract helm values: %w", err)
+		return nil, err
 	}
-	platformCluster := metricsoperator.NewManagedCluster(r.PlatformCluster, r.PlatformCluster.RESTConfig(), tenantNamespace, metricsoperator.PlatformCluster)
-	externalSecretsNamespace := metricsoperator.DefaultNamespace
-	if helmValues.NamespaceOverride != "" {
-		externalSecretsNamespace = helmValues.NamespaceOverride
+
+	platformCluster := resources.NewManagedCluster(r.PlatformCluster, r.PlatformCluster.RESTConfig(), tenantNamespace, resources.PlatformCluster)
+	workloadCluster := resources.NewManagedCluster(clusters.WorkloadCluster, clusters.WorkloadCluster.RESTConfig(), instance.Namespace(obj), resources.WorkloadCluster)
+	mcpCluster := resources.NewManagedCluster(clusters.MCPCluster, clusters.MCPCluster.RESTConfig(), metricsoperator.DefaultNamespace, resources.ManagedControlPlane)
+
+	// ### MCP RESOURCES ###
+	// set namespace deletion policy orphan to prevent deleting end user data that we are not aware of
+	mcpServiceAccount := authn.ManagedServiceAccount{
+		NamespacedName: types.NamespacedName{
+			Name:      "metrics-operator-server",
+			Namespace: mcpCluster.GetDefaultNamespace(),
+		},
 	}
-	mcpCluster := metricsoperator.NewManagedCluster(clusters.MCPCluster, clusters.MCPCluster.RESTConfig(), externalSecretsNamespace, metricsoperator.ManagedControlPlane)
+
+	mcpServiceAccount.Configure(workloadCluster, mcpCluster, moVersion.HelmValues, pc.PollInterval())
+	moVersion.HelmValues, err = helm.AddAuthToHelmValues(moVersion.HelmValues, mcpCluster, mcpServiceAccount.KubeAPIAccess())
+	if err != nil {
+		return nil, fmt.Errorf("failed to add auth to helm values: %w", err)
+	}
+	moVersion.HelmValues, err = helm.AddDefaultHelmValues(moVersion.HelmValues, mcpCluster.GetDefaultNamespace())
+	if err != nil {
+		return nil, fmt.Errorf("failed to add auth to helm values: %w", err)
+	}
+
+	authz.Configure(mcpCluster, &mcpServiceAccount)
 
 	metricsoperator.ManageFluxResources(metricsoperator.ManageFluxResourcesParams{
-		Cluster:          platformCluster,
-		MCPNamespace:     externalSecretsNamespace,
-		Obj:              obj,
-		Interval:         pc.PollInterval(),
-		ClusterContext:   clusters,
-		RequestedVersion: esoVersion,
+		Cluster:           platformCluster,
+		MCPNamespace:      metricsoperator.DefaultNamespace,
+		WorkloadNamespace: instance.Namespace(obj),
+		Obj:               obj,
+		Interval:          pc.PollInterval(),
+		ClusterContext:    clusters,
+		RequestedVersion:  moVersion,
 	})
-	mgr := metricsoperator.NewManager()
+	mgr := resources.NewManager()
 	mgr.AddCluster(mcpCluster)
+	mgr.AddCluster(workloadCluster)
 	mgr.AddCluster(platformCluster)
 
 	return mgr, nil
@@ -165,7 +193,7 @@ func selectMetricsOperatorVersion(requestedVersion string, pc *apiv1alpha1.Provi
 	return apiv1alpha1.MetricsOperatorVersion{}, fmt.Errorf("%w: requested version (%s) is not available", ctrlerrors.ErrInvalidUserInput, requestedVersion)
 }
 
-func resultsToResources(ctx context.Context, results []metricsoperator.Result) ([]apiv1alpha1.ManagedResource, bool) {
+func resultsToResources(ctx context.Context, results []resources.Result) ([]apiv1alpha1.ManagedResource, bool) {
 	l := log.FromContext(ctx)
 	containsError := false
 	resources := make([]apiv1alpha1.ManagedResource, 0, len(results))
@@ -184,7 +212,7 @@ func resultsToResources(ctx context.Context, results []metricsoperator.Result) (
 		})
 		if res.Error != nil {
 			containsError = true
-			l.Error(res.Error, "objectID", metricsoperator.ObjectID(obj))
+			l.Error(res.Error, "objectID", objectutils.ObjectID(obj))
 		}
 	}
 	return resources, containsError
@@ -221,4 +249,15 @@ func (r *MetricsOperatorReconciler) IsReferencedSecret(ctx context.Context, secr
 	//     }
 	// }
 	return false
+}
+
+// sets an instance id that is used to label every managed resource and create an instance namespace on the workload cluster
+func (r *MetricsOperatorReconciler) ensureInstanceID(ctx context.Context, obj *apiv1alpha1.MetricsOperator) error {
+	if len(instance.GetID(obj)) == 0 {
+		instance.SetID(obj, instance.GenerateID(obj))
+		if err := r.OnboardingCluster.Client().Update(ctx, obj); err != nil {
+			return fmt.Errorf("failed to set instance id of metrics operator resource %s/%s: %w", obj.Namespace, obj.Name, err)
+		}
+	}
+	return nil
 }

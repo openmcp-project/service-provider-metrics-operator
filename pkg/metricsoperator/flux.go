@@ -3,6 +3,7 @@ package metricsoperator
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
@@ -16,6 +17,7 @@ import (
 	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider/clusteraccess"
 
 	apiv1alpha1 "github.com/openmcp-project/service-provider-metrics-operator/api/v1alpha1"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/resources"
 )
 
 const (
@@ -30,9 +32,11 @@ const (
 // ManageFluxResourcesParams groups all parameters to create the required manage flux resources
 type ManageFluxResourcesParams struct {
 	// Cluster defines where the resources will be created
-	Cluster ManagedCluster
+	Cluster resources.ManagedCluster
 	// MCPNamespace defines the namespace name that deploy Metrics Operator
 	MCPNamespace string
+	// WorkloadNamespace defines the target namespace on the workload cluster where the chart is deployed
+	WorkloadNamespace string
 	// ChartPullSecretName defines the name of the secret copy that will be placed in the Cluster namespace
 	ChartPullSecretName string
 	// Obj is the tenant API object that is being reconciled
@@ -47,12 +51,12 @@ type ManageFluxResourcesParams struct {
 
 // ManageFluxResources configures OCIRepo and HelmRelease
 func ManageFluxResources(p ManageFluxResourcesParams) {
-	ociRepo := NewManagedObject(&sourcev1.OCIRepository{
+	ociRepo := resources.NewManagedObject(&sourcev1.OCIRepository{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      OCIRepositoryName,
 			Namespace: p.Cluster.GetDefaultNamespace(),
 		},
-	}, ManagedObjectContext{
+	}, resources.ManagedObjectContext{
 		ReconcileFunc: func(_ context.Context, o client.Object) error {
 			ociRepo, ok := o.(*sourcev1.OCIRepository)
 			if !ok {
@@ -65,6 +69,7 @@ func ManageFluxResources(p ManageFluxResourcesParams) {
 			ociRepo.Spec = sourcev1.OCIRepositorySpec{
 				Interval: metav1.Duration{Duration: p.Interval},
 				URL:      *p.RequestedVersion.ChartURL,
+				Insecure: strings.Contains(*p.RequestedVersion.ChartURL, "local") || strings.Contains(*p.RequestedVersion.ChartURL, "127.0.0.1"),
 				Reference: &sourcev1.OCIRepositoryRef{
 					Tag: p.RequestedVersion.ChartVersion,
 				},
@@ -84,18 +89,18 @@ func ManageFluxResources(p ManageFluxResourcesParams) {
 			}
 			return nil
 		},
-		DependsOn:      []ManagedObject{},
-		DeletionPolicy: Delete,
+		DependsOn:      []resources.ManagedObject{},
+		DeletionPolicy: resources.Delete,
 		StatusFunc:     FluxStatus,
 	})
 	p.Cluster.AddObject(ociRepo)
 
-	workloadHelmRelease := NewManagedObject(&helmv2.HelmRelease{
+	workloadHelmRelease := resources.NewManagedObject(&helmv2.HelmRelease{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      HelmReleaseName,
 			Namespace: p.Cluster.GetDefaultNamespace(),
 		},
-	}, ManagedObjectContext{
+	}, resources.ManagedObjectContext{
 		ReconcileFunc: func(_ context.Context, o client.Object) error {
 			helmRelease, ok := o.(*helmv2.HelmRelease)
 			if !ok {
@@ -124,23 +129,23 @@ func ManageFluxResources(p ManageFluxResourcesParams) {
 					Mode: helmv2.DriftDetectionEnabled,
 				},
 				Values:           p.RequestedVersion.HelmValues,
-				TargetNamespace:  p.MCPNamespace,
-				StorageNamespace: p.MCPNamespace,
+				TargetNamespace:  p.WorkloadNamespace,
+				StorageNamespace: p.WorkloadNamespace,
 			}
 			return nil
 		},
-		DependsOn:      []ManagedObject{ociRepo},
-		DeletionPolicy: Delete,
+		DependsOn:      []resources.ManagedObject{ociRepo},
+		DeletionPolicy: resources.Delete,
 		StatusFunc:     FluxStatus,
 	})
 	p.Cluster.AddObject(workloadHelmRelease)
 
-	mcpHelmRelease := NewManagedObject(&helmv2.HelmRelease{
+	mcpHelmRelease := resources.NewManagedObject(&helmv2.HelmRelease{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      HelmReleaseName,
 			Namespace: p.Cluster.GetDefaultNamespace(),
 		},
-	}, ManagedObjectContext{
+	}, resources.ManagedObjectContext{
 		ReconcileFunc: func(_ context.Context, o client.Object) error {
 			helmRelease, ok := o.(*helmv2.HelmRelease)
 			if !ok {
@@ -169,36 +174,36 @@ func ManageFluxResources(p ManageFluxResourcesParams) {
 					Mode: helmv2.DriftDetectionEnabled,
 				},
 				Values:           p.RequestedVersion.HelmValues,
-				TargetNamespace:  p.MCPNamespace,
-				StorageNamespace: p.MCPNamespace,
+				TargetNamespace:  p.WorkloadNamespace,
+				StorageNamespace: p.WorkloadNamespace,
 			}
 			return nil
 		},
-		DependsOn:      []ManagedObject{ociRepo},
-		DeletionPolicy: Delete,
+		DependsOn:      []resources.ManagedObject{ociRepo},
+		DeletionPolicy: resources.Delete,
 		StatusFunc:     FluxStatus,
 	})
 	p.Cluster.AddObject(mcpHelmRelease)
 }
 
 // FluxStatus indicates whether the given object is in phase terminating, pending or ready.
-func FluxStatus(o client.Object, rl apiv1alpha1.ResourceLocation) Status {
+func FluxStatus(o client.Object, rl apiv1alpha1.ResourceLocation) resources.Status {
 	fluxObject := o.(conditions.Getter)
 	if !o.GetDeletionTimestamp().IsZero() {
-		return Status{
+		return resources.Status{
 			Phase:    apiv1alpha1.Terminating,
 			Message:  "Resource is terminating.",
 			Location: rl,
 		}
 	}
 	if conditions.IsTrue(fluxObject, meta.ReadyCondition) {
-		return Status{
+		return resources.Status{
 			Phase:    apiv1alpha1.Ready,
 			Message:  "Resource is ready",
 			Location: rl,
 		}
 	}
-	return Status{
+	return resources.Status{
 		Phase:    apiv1alpha1.Pending,
 		Message:  "Resource is not ready",
 		Location: rl,
