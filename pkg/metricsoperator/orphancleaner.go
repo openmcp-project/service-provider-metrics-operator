@@ -12,27 +12,30 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	apiv1alpha1 "github.com/openmcp-project/service-provider-metrics-operator/api/v1alpha1"
+	mmeta "github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/meta"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/resources"
 )
 
-// ErrOrphanCleanup is an user-facing error indicating orphan cleanup failures.
+// ErrOrphanCleanup is an user-facing error that indicates orphan cleanup failures
 var ErrOrphanCleanup = errors.New("orphan cleanup failed")
 
-var _ OrphanCleaner = &orphanCleaner[*corev1.SecretList]{}
+var _ resources.OrphanCleaner = &orphanCleaner[*corev1.SecretList]{}
 
 type orphanCleaner[T client.ObjectList] struct {
-	cluster     ManagedCluster
+	cluster     resources.ManagedCluster
 	namespace   string
 	cleanerType cleanerType[T]
 }
 
 type cleanerType[T client.ObjectList] struct {
-	ObjectsToKeep    []corev1.LocalObjectReference
-	EmptyList        func() T
+	ObjectsToKeep []corev1.LocalObjectReference
+	EmptyList     func() T
+	// PreDeletionSteps is an optional hook that is invoked before OrphanCleaner.Cleanup deletes an object.
 	PreDeletionSteps func(context.Context, client.Object) (proceedWithDeletion bool, _ error)
 }
 
 // NewOrphanCleaner removes redundant objects in the given target namespace.
-func NewOrphanCleaner[T client.ObjectList](cluster ManagedCluster, namespace string, clType cleanerType[T]) OrphanCleaner {
+func NewOrphanCleaner[T client.ObjectList](cluster resources.ManagedCluster, namespace string, clType cleanerType[T]) resources.OrphanCleaner {
 	return &orphanCleaner[T]{
 		cluster:     cluster,
 		namespace:   namespace,
@@ -51,8 +54,8 @@ func (c *orphanCleaner[T]) items(list T) []client.Object {
 	return objList
 }
 
-func (c *orphanCleaner[T]) Cleanup(ctx context.Context) ([]Result, error) {
-	results := []Result{}
+func (c *orphanCleaner[T]) Cleanup(ctx context.Context) ([]resources.Result, error) {
+	results := []resources.Result{}
 	if c.cleanerType.EmptyList == nil {
 		return nil, fmt.Errorf("%w: orphan cleaner is missing empty list definition", ErrOrphanCleanup)
 	}
@@ -60,7 +63,7 @@ func (c *orphanCleaner[T]) Cleanup(ctx context.Context) ([]Result, error) {
 	cl := c.cluster.GetClient()
 	if err := cl.List(ctx, objList,
 		client.InNamespace(c.namespace),
-		client.MatchingLabels{LabelManagedBy: LabelManagedByValue},
+		client.MatchingLabels{mmeta.LabelManagedBy: mmeta.LabelManagedByValue},
 	); err != nil {
 		log.FromContext(ctx).Error(err, "failed to list objects for orphan cleanup")
 		return nil, ErrOrphanCleanup
@@ -86,35 +89,50 @@ func (c *orphanCleaner[T]) Cleanup(ctx context.Context) ([]Result, error) {
 	return results, nil
 }
 
-func (c *orphanCleaner[T]) deletionPrepared(obj client.Object) Result {
-	return Result{
-		Object: &managedObject{
-			object:         obj,
-			statusFunc:     cleanupPreparedStatus,
-			deletionPolicy: Delete,
-		},
+func (c *orphanCleaner[T]) deletionPrepared(obj client.Object) resources.Result {
+	moc := resources.ManagedObjectContext{
+		ReconcileFunc:  nil,
+		DependsOn:      nil,
+		StatusFunc:     cleanupPreparedStatus,
+		DeletionPolicy: resources.Delete,
+	}
+	mo := resources.NewManagedObject(obj, moc)
+
+	return resources.Result{
+		Object:          mo,
 		Cluster:         c.cluster,
-		OperationResult: OperationResultDeletionRequested,
+		OperationResult: resources.OperationResultDeletionRequested,
 	}
 }
 
-func cleanupPreparedStatus(_ client.Object, rl apiv1alpha1.ResourceLocation) Status {
-	return Status{Phase: apiv1alpha1.Terminating, Message: "Orphan cleanup prepared", Location: rl}
+func cleanupPreparedStatus(_ client.Object, rl apiv1alpha1.ResourceLocation) resources.Status {
+	return resources.Status{
+		Phase:    apiv1alpha1.Terminating,
+		Message:  "Orphan cleanup prepared",
+		Location: rl,
+	}
 }
 
-func (c *orphanCleaner[T]) deletionError(obj client.Object, err error) Result {
-	return Result{
-		Object: &managedObject{
-			object:         obj,
-			statusFunc:     cleanupErrorStatus,
-			deletionPolicy: Delete,
-		},
+func (c *orphanCleaner[T]) deletionError(obj client.Object, err error) resources.Result {
+	moc := resources.ManagedObjectContext{
+		ReconcileFunc:  nil,
+		DependsOn:      nil,
+		StatusFunc:     cleanupErrorStatus,
+		DeletionPolicy: resources.Delete,
+	}
+	mo := resources.NewManagedObject(obj, moc)
+	return resources.Result{
+		Object:          mo,
 		Cluster:         c.cluster,
-		OperationResult: OperationResultDeletionFailed,
+		OperationResult: resources.OperationResultDeletionFailed,
 		Error:           err,
 	}
 }
 
-func cleanupErrorStatus(_ client.Object, rl apiv1alpha1.ResourceLocation) Status {
-	return Status{Phase: apiv1alpha1.Terminating, Message: "Orphan cleanup failed", Location: rl}
+func cleanupErrorStatus(_ client.Object, rl apiv1alpha1.ResourceLocation) resources.Status {
+	return resources.Status{
+		Phase:    apiv1alpha1.Terminating,
+		Message:  "Orphan cleanup failed",
+		Location: rl,
+	}
 }

@@ -1,11 +1,11 @@
-package metricsoperator
+package meta
 
 import "sigs.k8s.io/controller-runtime/pkg/client"
 
 const (
-	// LabelManagedBy defines the managed-by label added to every managed object.
+	// LabelManagedBy defines the managed-by label that is added to every managed object.
 	LabelManagedBy = "app.kubernetes.io/managed-by"
-	// LabelManagedByValue defines the managed-by value added to every managed object.
+	// LabelManagedByValue defines the managed-by value that is added to every managed object.
 	LabelManagedByValue = "service-provider-metrics-operator"
 )
 
@@ -19,7 +19,7 @@ func SetManagedBy(o client.Object) {
 	o.SetLabels(labels)
 }
 
-// ManagedBy returns the managed-by label as a list option.
+// ManagedBy returns the managed-by label of the given client.Object.
 func ManagedBy() client.ListOption {
 	return client.MatchingLabels{
 		LabelManagedBy: LabelManagedByValue,

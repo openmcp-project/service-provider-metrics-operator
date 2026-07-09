@@ -1,4 +1,4 @@
-package metricsoperator
+package resources
 
 import (
 	"context"
@@ -6,13 +6,15 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/meta"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/objectutils"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 const (
-	// OperationResultDeletionFailed indicates failed to delete
+	// OperationResultDeletionFailed indicates failed to be deleted
 	OperationResultDeletionFailed controllerutil.OperationResult = "deletionFailed"
 	// OperationResultDeletionRequested indicates that an object has been marked for deletion
 	OperationResultDeletionRequested controllerutil.OperationResult = "deletionRequested"
@@ -24,7 +26,7 @@ const (
 
 type dependents map[ManagedObject][]dependency
 
-// Manager manages the objects of an arbitrary number of clusters.
+// Manager manages the objects of an arbitrary number of clusters
 type Manager interface {
 	AddCluster(mc ManagedCluster)
 	AddCleaner(oc OrphanCleaner)
@@ -32,7 +34,7 @@ type Manager interface {
 	Delete(context.Context) (_ []Result, cleanup error)
 }
 
-// OrphanCleaner removes previously managed objects that are no longer part of the desired state.
+// OrphanCleaner removes any previously managed objects that are no longer part of the desired state.
 type OrphanCleaner interface {
 	Cleanup(ctx context.Context) ([]Result, error)
 }
@@ -104,7 +106,7 @@ func (m *managerImpl) reconcileObject(ctx context.Context, mc ManagedCluster, mo
 	}
 
 	opResult, err := controllerutil.CreateOrUpdate(ctx, cl, obj, func() error {
-		SetManagedBy(obj)
+		meta.SetManagedBy(obj)
 		return mo.Reconcile(ctx)
 	})
 	return Result{Object: mo, Cluster: mc, OperationResult: opResult, Error: err}
@@ -122,7 +124,7 @@ func (m *managerImpl) checkForDependents(ctx context.Context, deps []dependency)
 			errs = append(errs, err)
 			continue
 		}
-		errs = append(errs, fmt.Errorf("dependent object still exists: %s", ObjectID(obj)))
+		errs = append(errs, fmt.Errorf("dependent object still exists: %s", objectutils.ObjectID(obj)))
 	}
 	return errors.Join(errs...)
 }

@@ -1,85 +1,32 @@
-package metricsoperator
+package helm
 
 import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/resources"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 )
 
-// HelmValues defines the helm values explicitly processed during reconciliation.
-// Note: metrics-operator uses top-level imagePullSecrets, not global.imagePullSecrets.
+// HelmValues define the helm values that are explicitly processed during reconciliation
 type HelmValues struct {
 	NamespaceOverride string                        `json:"namespaceOverride,omitempty"`
 	ImagePullSecrets  []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
 }
 
-// ExtractHelmValues extracts helm values required for processing.
+// ExtractHelmValues extract helm values required for processing
 func ExtractHelmValues(values *apiextensionsv1.JSON) (*HelmValues, error) {
 	if values == nil || len(values.Raw) == 0 {
 		return &HelmValues{}, nil
 	}
+
 	vals := &HelmValues{}
 	if err := json.Unmarshal(values.Raw, vals); err != nil {
 		return nil, err
 	}
+
 	return vals, nil
-}
-
-// AddAuthToHelmValues injects a kube-api-access volume (from the SA token Secret) and
-// KUBERNETES_SERVICE_HOST/PORT env vars into the init and manager containers so the
-// metrics-operator --install-crds init container connects to the MCP cluster.
-func AddAuthToHelmValues(values *apiextensionsv1.JSON, mcpCluster ManagedCluster, msa *ManagedServiceAccount) (*apiextensionsv1.JSON, error) {
-	authVolume := corev1.Volume{
-		Name: serviceAccountVolume,
-		VolumeSource: corev1.VolumeSource{
-			Secret: &corev1.SecretVolumeSource{
-				SecretName: msa.KubeAPIAccessSecretName(),
-			},
-		},
-	}
-	authMount := corev1.VolumeMount{
-		Name:      serviceAccountVolume,
-		ReadOnly:  true,
-		MountPath: serviceAccountMountPath,
-	}
-	mcpHost, mcpPort := mcpCluster.GetHostAndPort()
-	hostEnv := corev1.EnvVar{Name: "KUBERNETES_SERVICE_HOST", Value: mcpHost}
-	portEnv := corev1.EnvVar{Name: "KUBERNETES_SERVICE_PORT", Value: mcpPort}
-
-	root, err := unmarshalRoot(values)
-	if err != nil {
-		return nil, err
-	}
-
-	// extraVolumes (top-level)
-	var extraVolumes []corev1.Volume
-	if err := unmarshalKey(root, "extraVolumes", &extraVolumes); err != nil {
-		return nil, fmt.Errorf("extraVolumes: %w", err)
-	}
-	extraVolumes = upsertVolume(extraVolumes, authVolume)
-	if root["extraVolumes"], err = json.Marshal(extraVolumes); err != nil {
-		return nil, err
-	}
-
-	// init container overrides
-	root["init"], err = patchContainerSection(root["init"], authMount, hostEnv, portEnv)
-	if err != nil {
-		return nil, fmt.Errorf("init: %w", err)
-	}
-
-	// manager container overrides
-	root["manager"], err = patchContainerSection(root["manager"], authMount, hostEnv, portEnv)
-	if err != nil {
-		return nil, fmt.Errorf("manager: %w", err)
-	}
-
-	out, err := json.Marshal(root)
-	if err != nil {
-		return nil, err
-	}
-	return &apiextensionsv1.JSON{Raw: out}, nil
 }
 
 // AddDefaultHelmValues sets helm values that are required for the MCP deployment:
@@ -110,6 +57,67 @@ func AddDefaultHelmValues(values *apiextensionsv1.JSON, mcpNamespace string) (*a
 	}
 	return &apiextensionsv1.JSON{Raw: out}, nil
 }
+
+// AddAuthToHelmValues injects a kube-api-access volume (from the SA token Secret) and
+// KUBERNETES_SERVICE_HOST/PORT env vars into the init and manager containers so the
+// metrics-operator --install-crds init container connects to the MCP cluster.
+// nolint:gocyclo
+func AddAuthToHelmValues(values *apiextensionsv1.JSON, remoteCluster resources.ManagedCluster, saName string) (*apiextensionsv1.JSON, error) {
+	authVolume := corev1.Volume{
+		Name: serviceAccountVolume,
+		VolumeSource: corev1.VolumeSource{
+			Secret: &corev1.SecretVolumeSource{
+				SecretName: saName,
+			},
+		},
+	}
+	authVolumeMount := corev1.VolumeMount{
+		Name:      serviceAccountVolume,
+		ReadOnly:  true,
+		MountPath: serviceAccountMountPath,
+	}
+	remoteHost, remotePort := remoteCluster.GetHostAndPort()
+	hostEnv := corev1.EnvVar{Name: "KUBERNETES_SERVICE_HOST", Value: remoteHost}
+	portEnv := corev1.EnvVar{Name: "KUBERNETES_SERVICE_PORT", Value: remotePort}
+
+	root, err := unmarshalRoot(values)
+	if err != nil {
+		return nil, err
+	}
+
+	// extraVolumes (top-level)
+	var extraVolumes []corev1.Volume
+	if err := unmarshalKey(root, "extraVolumes", &extraVolumes); err != nil {
+		return nil, fmt.Errorf("extraVolumes: %w", err)
+	}
+	extraVolumes = upsertVolume(extraVolumes, authVolume)
+	if root["extraVolumes"], err = json.Marshal(extraVolumes); err != nil {
+		return nil, err
+	}
+
+	// init container overrides
+	root["init"], err = patchContainerSection(root["init"], authVolumeMount, hostEnv, portEnv)
+	if err != nil {
+		return nil, fmt.Errorf("init: %w", err)
+	}
+
+	// manager container overrides
+	root["manager"], err = patchContainerSection(root["manager"], authVolumeMount, hostEnv, portEnv)
+	if err != nil {
+		return nil, fmt.Errorf("manager: %w", err)
+	}
+
+	out, err := json.Marshal(root)
+	if err != nil {
+		return nil, err
+	}
+	return &apiextensionsv1.JSON{Raw: out}, nil
+}
+
+const (
+	serviceAccountMountPath = "/var/run/secrets/kubernetes.io/serviceaccount"
+	serviceAccountVolume    = "kube-api-access"
+)
 
 func unmarshalRoot(values *apiextensionsv1.JSON) (map[string]json.RawMessage, error) {
 	root := map[string]json.RawMessage{}

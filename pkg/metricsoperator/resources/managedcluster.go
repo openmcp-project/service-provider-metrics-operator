@@ -1,4 +1,4 @@
-package metricsoperator
+package resources
 
 import (
 	"strings"
@@ -9,15 +9,15 @@ import (
 )
 
 const (
-	// ClusterTypeManagedControlPlane indicates a managed control plane cluster.
-	ClusterTypeManagedControlPlane ClusterType = "ManagedControlPlane"
-	// ClusterTypePlatform indicates a platform cluster.
-	ClusterTypePlatform ClusterType = "PlatformCluster"
-	// ClusterTypeWorkload indicates a workload cluster.
-	ClusterTypeWorkload ClusterType = "WorkloadCluster"
+	// ManagedControlPlane indicates that a cluster is a managed control plane.
+	ManagedControlPlane ClusterType = "ManagedControlPlane"
+	// PlatformCluster indicates that a cluster is a platform cluster.
+	PlatformCluster ClusterType = "PlatformCluster"
+	// WorkloadCluster indicates that a cluster is a workload cluster.
+	WorkloadCluster ClusterType = "WorkloadCluster"
 )
 
-// ClusterType distinguishes between managed control plane, platform, and workload clusters.
+// ClusterType distinguishes between managed control plane and workload clusters.
 type ClusterType string
 
 // NewManagedCluster creates a new ManagedCluster instance.

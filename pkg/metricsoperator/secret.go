@@ -6,6 +6,7 @@ import (
 
 	ctrlutils "github.com/openmcp-project/controller-utils/pkg/controller"
 	openmcpresources "github.com/openmcp-project/controller-utils/pkg/resources"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/resources"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -22,13 +23,13 @@ type SecretCopyConfig struct {
 const secretNamePrefix = "sp-metricsop-"
 
 // ManagePullSecret syncs a pull secret to the target cluster.
-func ManagePullSecret(targetCluster ManagedCluster, pullSecret corev1.LocalObjectReference, config SecretCopyConfig) {
-	secret := NewManagedObject(&corev1.Secret{
+func ManagePullSecret(targetCluster resources.ManagedCluster, pullSecret corev1.LocalObjectReference, config SecretCopyConfig) {
+	secret := resources.NewManagedObject(&corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      config.TargetName,
 			Namespace: config.TargetNamespace,
 		},
-	}, ManagedObjectContext{
+	}, resources.ManagedObjectContext{
 		ReconcileFunc: func(ctx context.Context, o client.Object) error {
 			oSecret, ok := o.(*corev1.Secret)
 			if !ok {
@@ -46,13 +47,13 @@ func ManagePullSecret(targetCluster ManagedCluster, pullSecret corev1.LocalObjec
 			mutator := openmcpresources.NewSecretMutator(config.TargetName, config.TargetNamespace, sourceSecret.Data, corev1.SecretTypeDockerConfigJson)
 			return mutator.Mutate(oSecret)
 		},
-		StatusFunc: SimpleStatus,
+		StatusFunc: resources.SimpleStatus,
 	})
 	targetCluster.AddObject(secret)
 }
 
 // ManagePullSecrets syncs multiple pull secrets to the target cluster.
-func ManagePullSecrets(targetCluster ManagedCluster, pullSecrets []corev1.LocalObjectReference, config SecretCopyConfig) {
+func ManagePullSecrets(targetCluster resources.ManagedCluster, pullSecrets []corev1.LocalObjectReference, config SecretCopyConfig) {
 	for _, ps := range pullSecrets {
 		cfg := config
 		cfg.TargetName = ps.Name
@@ -66,7 +67,7 @@ func PrefixSecretName(secretName string) (string, error) {
 }
 
 // NewSecretCleaner removes redundant pull secrets in the given target namespace.
-func NewSecretCleaner(cluster ManagedCluster, namespace string, secretsToKeep []corev1.LocalObjectReference) OrphanCleaner {
+func NewSecretCleaner(cluster resources.ManagedCluster, namespace string, secretsToKeep []corev1.LocalObjectReference) resources.OrphanCleaner {
 	return NewOrphanCleaner(cluster, namespace, cleanerType[*corev1.SecretList]{
 		EmptyList: func() *corev1.SecretList {
 			return &corev1.SecretList{}

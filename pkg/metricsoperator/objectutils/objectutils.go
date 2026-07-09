@@ -1,4 +1,4 @@
-package metricsoperator
+package objectutils
 
 import (
 	"fmt"
