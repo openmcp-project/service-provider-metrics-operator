@@ -40,7 +40,7 @@ import (
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/authn"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/authz"
-	helmutil "github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/helm"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/helm"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/instance"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/objectutils"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/resources"
@@ -62,9 +62,9 @@ type MetricsOperatorReconciler struct {
 }
 
 // CreateOrUpdate is called on every add or update event
-func (r *MetricsOperatorReconciler) CreateOrUpdate(ctx context.Context, obj *apiv1alpha1.MetricsOperator, pc *apiv1alpha1.ProviderConfig, clusterCtx clusteraccess.ClusterContext) (ctrl.Result, error) {
+func (r *MetricsOperatorReconciler) CreateOrUpdate(ctx context.Context, obj *apiv1alpha1.MetricsOperator, pc *apiv1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (ctrl.Result, error) {
 	serviceprovider.StatusProgressing(obj, "Reconciling", "Reconcile in progress")
-	mgr, err := r.createObjectManager(ctx, obj, pc, clusterCtx)
+	mgr, err := r.createObjectManager(ctx, obj, pc, clusters)
 	if err != nil {
 		serviceprovider.StatusProgressing(obj, conditionReasonError, err.Error())
 		return ctrl.Result{}, ctrlerrors.IgnoreInvalidUserInput(err)
@@ -82,9 +82,9 @@ func (r *MetricsOperatorReconciler) CreateOrUpdate(ctx context.Context, obj *api
 }
 
 // Delete is called on every delete event
-func (r *MetricsOperatorReconciler) Delete(ctx context.Context, obj *apiv1alpha1.MetricsOperator, pc *apiv1alpha1.ProviderConfig, clusterCtx clusteraccess.ClusterContext) (ctrl.Result, error) {
+func (r *MetricsOperatorReconciler) Delete(ctx context.Context, obj *apiv1alpha1.MetricsOperator, pc *apiv1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (ctrl.Result, error) {
 	serviceprovider.StatusTerminating(obj)
-	mgr, err := r.createObjectManager(ctx, obj, pc, clusterCtx)
+	mgr, err := r.createObjectManager(ctx, obj, pc, clusters)
 	if err != nil {
 		serviceprovider.StatusProgressing(obj, conditionReasonError, err.Error())
 		return ctrl.Result{}, ctrlerrors.IgnoreInvalidUserInput(err)
@@ -101,29 +101,31 @@ func (r *MetricsOperatorReconciler) Delete(ctx context.Context, obj *apiv1alpha1
 	return ctrl.Result{RequeueAfter: time.Second * 5}, nil
 }
 
-// IsReferencedSecret returns true if the given secret should trigger reconciliation.
-func (r *MetricsOperatorReconciler) IsReferencedSecret(_ context.Context, secret *corev1.Secret, pc *apiv1alpha1.ProviderConfig) bool {
-	if pc == nil {
-		return false
+func updateStatusError(obj *apiv1alpha1.MetricsOperator, resourceErrors bool, err error) error {
+	if resourceErrors {
+		err = errors.Join(ErrManagedResources, err)
 	}
-	for _, version := range pc.Spec.Versions {
-		if version.ChartPullSecret == secret.Name {
-			return true
-		}
-		helmValues, err := helmutil.ExtractHelmValues(version.HelmValues)
-		if err != nil {
-			continue
-		}
-		for _, ref := range helmValues.ImagePullSecrets {
-			if ref.Name == secret.Name {
-				return true
-			}
-		}
-	}
-	return false
+	serviceprovider.StatusProgressing(obj, conditionReasonError, userErrorMessage(err))
+	return ctrlerrors.IgnoreInvalidUserInput(err)
 }
 
-func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj *apiv1alpha1.MetricsOperator, pc *apiv1alpha1.ProviderConfig, clusterCtx clusteraccess.ClusterContext) (resources.Manager, error) {
+// userErrorMessage constructs an end-user facing error message.
+// Only end-user errors are processed.
+func userErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	errorMessages := []string{}
+	if errors.Is(err, ErrManagedResources) {
+		errorMessages = append(errorMessages, ErrManagedResources.Error())
+	}
+	if errors.Is(err, metricsoperator.ErrOrphanCleanup) {
+		errorMessages = append(errorMessages, metricsoperator.ErrOrphanCleanup.Error())
+	}
+	return strings.Join(errorMessages, "; ")
+}
+
+func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj *apiv1alpha1.MetricsOperator, pc *apiv1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (resources.Manager, error) {
 	tenantNamespace, err := libutils.StableMCPNamespace(obj.Name, obj.Namespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine tenant namespace: %w", err)
@@ -133,48 +135,45 @@ func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj
 		return nil, err
 	}
 
-	version, err := selectVersion(obj.Spec.Version, pc)
+	moVersion, err := selectMetricsOperatorVersion(obj.Spec.Version, pc)
 	if err != nil {
 		return nil, err
 	}
-	helmValues, err := helmutil.ExtractHelmValues(version.HelmValues)
+	helmValues, err := helm.ExtractHelmValues(moVersion.HelmValues)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract helm values: %w", err)
 	}
 
 	platformCluster := resources.NewManagedCluster(r.PlatformCluster, r.PlatformCluster.RESTConfig(), tenantNamespace, resources.PlatformCluster)
+	workloadCluster := resources.NewManagedCluster(clusters.WorkloadCluster, clusters.WorkloadCluster.RESTConfig(), instance.Namespace(obj), resources.WorkloadCluster)
+	mcpCluster := resources.NewManagedCluster(clusters.MCPCluster, clusters.MCPCluster.RESTConfig(), metricsoperator.DefaultNamespace, resources.ManagedControlPlane)
 
 	metricsNamespace := metricsoperator.DefaultNamespace
 	if helmValues.NamespaceOverride != "" {
 		metricsNamespace = helmValues.NamespaceOverride
 	}
 
-	mcpCluster := resources.NewManagedCluster(clusterCtx.MCPCluster, clusterCtx.MCPCluster.RESTConfig(), metricsNamespace, resources.ManagedControlPlane)
-
 	// ServiceAccount on MCP + token Secret on workload cluster so --install-crds connects to MCP.
-	mcpSA := &authn.ManagedServiceAccount{
+	mcpServiceAccount := &authn.ManagedServiceAccount{
 		NamespacedName: k8stypes.NamespacedName{
 			Name:      "metrics-operator-server",
-			Namespace: metricsNamespace,
+			Namespace: mcpCluster.GetDefaultNamespace(),
 		},
 	}
 
-	// Workload cluster: used to sync image pull secrets so Flux can pull the chart image.
-	workloadCluster := resources.NewManagedCluster(clusterCtx.WorkloadCluster, clusterCtx.WorkloadCluster.RESTConfig(), instance.Namespace(obj), resources.WorkloadCluster)
+	mcpServiceAccount.Configure(workloadCluster, mcpCluster, moVersion.HelmValues, pc.PollInterval())
 
-	mcpSA.Configure(workloadCluster, mcpCluster, version.HelmValues, pc.PollInterval())
-	authz.Configure(mcpCluster, mcpSA)
-
-	version.HelmValues, err = helmutil.AddAuthToHelmValues(version.HelmValues, mcpCluster, mcpSA.KubeAPIAccess())
+	moVersion.HelmValues, err = helm.AddAuthToHelmValues(moVersion.HelmValues, mcpCluster, mcpServiceAccount.KubeAPIAccess())
 	if err != nil {
 		return nil, fmt.Errorf("failed to inject MCP auth into helm values: %w", err)
 	}
-	version.HelmValues, err = helmutil.AddDefaultHelmValues(version.HelmValues, metricsNamespace)
+	moVersion.HelmValues, err = helm.AddDefaultHelmValues(moVersion.HelmValues, metricsNamespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to set default helm values: %w", err)
 	}
+	authz.Configure(mcpCluster, mcpServiceAccount)
 
-	prefixedChartPullSecret, err := r.managePullSecrets(platformCluster, workloadCluster, helmValues, version, tenantNamespace, metricsNamespace)
+	prefixedChartPullSecret, err := r.managePullSecrets(platformCluster, workloadCluster, helmValues, moVersion, tenantNamespace, metricsNamespace)
 	if err != nil {
 		return nil, err
 	}
@@ -186,8 +185,8 @@ func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj
 		ChartPullSecretName: prefixedChartPullSecret,
 		Obj:                 obj,
 		Interval:            pc.PollInterval(),
-		ClusterContext:      clusterCtx,
-		RequestedVersion:    version,
+		ClusterContext:      clusters,
+		RequestedVersion:    moVersion,
 	})
 
 	mgr := resources.NewManager()
@@ -206,10 +205,73 @@ func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj
 	return mgr, nil
 }
 
+func resultsToResources(ctx context.Context, results []resources.Result) ([]apiv1alpha1.ManagedResource, bool) {
+	l := log.FromContext(ctx)
+	containsError := false
+	resources := make([]apiv1alpha1.ManagedResource, 0, len(results))
+	for _, res := range results {
+		obj := res.Object.GetObject()
+		status := res.Object.GetStatus(apiv1alpha1.ResourceLocation(res.Cluster.GetClusterType()))
+		resources = append(resources, apiv1alpha1.ManagedResource{
+			TypedObjectReference: corev1.TypedObjectReference{
+				Kind:      reflect.TypeOf(obj).Elem().Name(),
+				Name:      obj.GetName(),
+				Namespace: nilIfEmptyString(obj.GetNamespace()),
+			},
+			Phase:    status.Phase,
+			Message:  status.Message,
+			Location: status.Location,
+		})
+		if res.Error != nil {
+			containsError = true
+			l.Error(res.Error, "objectID", objectutils.ObjectID(obj))
+		}
+	}
+	return resources, containsError
+}
+
+func nilIfEmptyString(str string) *string {
+	if str == "" {
+		return nil
+	}
+	return ptr.To(str)
+}
+
+func allResourcesReady(resources []apiv1alpha1.ManagedResource) bool {
+	for _, r := range resources {
+		if r.Phase != apiv1alpha1.Ready {
+			return false
+		}
+	}
+	return true
+}
+
+// IsReferencedSecret returns true if the given secret should trigger reconciliation.
+func (r *MetricsOperatorReconciler) IsReferencedSecret(_ context.Context, secret *corev1.Secret, pc *apiv1alpha1.ProviderConfig) bool {
+	if pc == nil {
+		return false
+	}
+	for _, version := range pc.Spec.Versions {
+		if version.ChartPullSecret == secret.Name {
+			return true
+		}
+		helmValues, err := helm.ExtractHelmValues(version.HelmValues)
+		if err != nil {
+			continue
+		}
+		for _, ref := range helmValues.ImagePullSecrets {
+			if ref.Name == secret.Name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (r *MetricsOperatorReconciler) managePullSecrets(
 	platformCluster resources.ManagedCluster,
 	workloadCluster resources.ManagedCluster,
-	helmValues *helmutil.HelmValues,
+	helmValues *helm.HelmValues,
 	version apiv1alpha1.MetricsOperatorVersion,
 	tenantNamespace, metricsNamespace string,
 ) (string, error) {
@@ -244,74 +306,11 @@ func (r *MetricsOperatorReconciler) ensureInstanceID(ctx context.Context, obj *a
 	return nil
 }
 
-func selectVersion(requestedVersion string, pc *apiv1alpha1.ProviderConfig) (apiv1alpha1.MetricsOperatorVersion, error) {
+func selectMetricsOperatorVersion(requestedVersion string, pc *apiv1alpha1.ProviderConfig) (apiv1alpha1.MetricsOperatorVersion, error) {
 	for _, v := range pc.Spec.Versions {
 		if v.Version == requestedVersion {
 			return v, nil
 		}
 	}
 	return apiv1alpha1.MetricsOperatorVersion{}, fmt.Errorf("%w: requested version (%s) is not available", ctrlerrors.ErrInvalidUserInput, requestedVersion)
-}
-
-func updateStatusError(obj *apiv1alpha1.MetricsOperator, resourceErrors bool, err error) error {
-	if resourceErrors {
-		err = errors.Join(ErrManagedResources, err)
-	}
-	serviceprovider.StatusProgressing(obj, conditionReasonError, userErrorMessage(err))
-	return ctrlerrors.IgnoreInvalidUserInput(err)
-}
-
-func userErrorMessage(err error) string {
-	if err == nil {
-		return ""
-	}
-	msgs := []string{}
-	if errors.Is(err, ErrManagedResources) {
-		msgs = append(msgs, ErrManagedResources.Error())
-	}
-	if errors.Is(err, metricsoperator.ErrOrphanCleanup) {
-		msgs = append(msgs, metricsoperator.ErrOrphanCleanup.Error())
-	}
-	return strings.Join(msgs, "; ")
-}
-
-func resultsToResources(ctx context.Context, results []resources.Result) ([]apiv1alpha1.ManagedResource, bool) {
-	l := log.FromContext(ctx)
-	containsError := false
-	managed := make([]apiv1alpha1.ManagedResource, 0, len(results))
-	for _, res := range results {
-		obj := res.Object.GetObject()
-		status := res.Object.GetStatus(apiv1alpha1.ResourceLocation(res.Cluster.GetClusterType()))
-		managed = append(managed, apiv1alpha1.ManagedResource{
-			TypedObjectReference: corev1.TypedObjectReference{
-				Kind:      reflect.TypeOf(obj).Elem().Name(),
-				Name:      obj.GetName(),
-				Namespace: nilIfEmptyString(obj.GetNamespace()),
-			},
-			Phase:    status.Phase,
-			Message:  status.Message,
-			Location: status.Location,
-		})
-		if res.Error != nil {
-			containsError = true
-			l.Error(res.Error, "objectID", objectutils.ObjectID(obj))
-		}
-	}
-	return managed, containsError
-}
-
-func nilIfEmptyString(str string) *string {
-	if str == "" {
-		return nil
-	}
-	return ptr.To(str)
-}
-
-func allResourcesReady(res []apiv1alpha1.ManagedResource) bool {
-	for _, r := range res {
-		if r.Phase != apiv1alpha1.Ready {
-			return false
-		}
-	}
-	return true
 }
