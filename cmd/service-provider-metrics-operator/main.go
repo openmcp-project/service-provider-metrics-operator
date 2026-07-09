@@ -36,7 +36,6 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -325,8 +324,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	providerConfigUpdates := make(chan event.GenericEvent)
-
 	// TODO: define minimum set of permission the service provider requires on the mcp cluster
 	mcpTokenAccessConfig := &clustersv1alpha1.TokenConfig{
 		Permissions: []clustersv1alpha1.PermissionsRequest{
@@ -409,6 +406,7 @@ func main() {
 
 	spr := serviceprovider.NewAPIReconcilerBuilder[*metricsoperatorsv1alpha1.MetricsOperator, *metricsoperatorsv1alpha1.ProviderConfig]().
 		EmptyObjectProvider(func() *metricsoperatorsv1alpha1.MetricsOperator { return &metricsoperatorsv1alpha1.MetricsOperator{} }).
+		EmptyConfigProvider(func() *metricsoperatorsv1alpha1.ProviderConfig { return &metricsoperatorsv1alpha1.ProviderConfig{} }).
 		PlatformCluster(platformCluster).
 		OnboardingCluster(onboardingCluster).
 		SecretNamespace(podNamespace).
@@ -420,18 +418,9 @@ func main() {
 		AdvancedClusterAccessReconciler(clusterAccessReconciler).
 		WorkloadCluster(true).
 		MustBuild()
-	if err := spr.SetupWithManager(mgr, "metricsoperator", providerConfigUpdates); err != nil {
+
+	if err := spr.SetupWithManager(mgr, "metricsoperator"); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MetricsOperator")
-		os.Exit(1)
-	}
-	pcr := serviceprovider.NewConfigReconcilerBuilder[*metricsoperatorsv1alpha1.ProviderConfig]().
-		EmptyObjectProvider(func() *metricsoperatorsv1alpha1.ProviderConfig { return &metricsoperatorsv1alpha1.ProviderConfig{} }).
-		ProviderName(providerName).
-		PlatformCluster(platformCluster).
-		UpdateChannel(providerConfigUpdates).
-		MustBuild()
-	if err := pcr.SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ProviderConfig")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
