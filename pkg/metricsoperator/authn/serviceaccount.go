@@ -93,6 +93,17 @@ func generateToken(ctx context.Context, mcp *clusters.Cluster, cfg *rest.Config,
 
 // Configure adds a managed ServiceAccount object to the given MCP cluster and a managed Secret object to the given workload cluster.
 func (m *ManagedServiceAccount) Configure(workloadCluster, mcpCluster resources.ManagedCluster, values *apiextensionsv1.JSON, pollInterval time.Duration) {
+	// Add a namespace on the MCP cluster so the service account has a place to live.
+	ns := resources.NewManagedObject(&corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: m.Namespace,
+		},
+	}, resources.ManagedObjectContext{
+		ReconcileFunc: resources.NoOp,
+		StatusFunc:    resources.SimpleStatus,
+	})
+	mcpCluster.AddObject(ns)
+
 	// Add a service account on the MCP cluster.
 	sa := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
@@ -101,6 +112,7 @@ func (m *ManagedServiceAccount) Configure(workloadCluster, mcpCluster resources.
 		},
 	}
 	msa := resources.NewManagedObject(sa, resources.ManagedObjectContext{
+		DependsOn:     []resources.ManagedObject{ns},
 		ReconcileFunc: resources.NoOp,
 		StatusFunc:    resources.SimpleStatus,
 	})
