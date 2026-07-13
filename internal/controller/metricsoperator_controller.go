@@ -163,7 +163,7 @@ func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj
 		},
 	}
 
-	mcpServiceAccount.Configure(workloadCluster, mcpCluster, moVersion.HelmValues, pc.PollInterval())
+	mcpServiceAccount.Configure(workloadCluster, mcpCluster, pc.PollInterval())
 
 	moVersion.HelmValues, err = helm.AddAuthToHelmValues(moVersion.HelmValues, mcpCluster, mcpServiceAccount.KubeAPIAccess())
 	if err != nil {

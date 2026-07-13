@@ -286,7 +286,7 @@ func unmarshalIfPresent(obj map[string]json.RawMessage, key string, out any) err
 }
 
 // Configure adds a managed ServiceAccount object to the given MCP cluster and a managed Secret object to the given workload cluster.
-func (m *ManagedServiceAccount) Configure(workloadCluster, mcpCluster resources.ManagedCluster, values *apiextensionsv1.JSON, pollInterval time.Duration) {
+func (m *ManagedServiceAccount) Configure(workloadCluster, mcpCluster resources.ManagedCluster, pollInterval time.Duration) {
 	// Add a namespace on the MCP cluster so the service account has a place to live.
 	ns := resources.NewManagedObject(&corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{

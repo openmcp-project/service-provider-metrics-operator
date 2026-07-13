@@ -1,0 +1,15 @@
+apiVersion: metrics.openmcp.cloud/v1alpha1
+kind: Metric
+metadata:
+  name: basic-pods
+spec:
+  name: pods-metric
+  description: Pods
+  target:
+    kind: pod
+    group: ""
+    version: v1
+  interval: 1m # in minutes
+  projections:
+    - name: pod-namespace
+      fieldPath: "metadata.namespace"

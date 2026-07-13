@@ -3,8 +3,8 @@ kind: ProviderConfig
 metadata:
   name: metricsoperator
 spec:
-  pollInterval: 60m
+  pollInterval: 1m
   versions:
-    - version: "v0.11.1"
-      chartVersion: "v0.11.1"
+    - version: "v0.11.3"
+      chartVersion: "v0.11.3"
       chartURL: oci://ghcr.io/openmcp-project/charts/metrics-operator
