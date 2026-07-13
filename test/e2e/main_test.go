@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
+	"syscall"
 	"testing"
 
 	"k8s.io/klog/v2"
@@ -51,8 +53,27 @@ func TestMain(m *testing.M) {
 		},
 	}
 	testenv = env.NewWithConfig(envconf.New().WithNamespace(openmcp.Namespace))
-	openmcp.Bootstrap(testenv)
+	platformCluster := openmcp.Bootstrap(testenv)
+	handleSignals(platformCluster)
 	os.Exit(testenv.Run(m))
+}
+
+// handleSignals intercepts SIGQUIT/SIGTERM/SIGINT so that when go test fires its
+// timeout it sends SIGQUIT to the subprocess, which by default triggers a goroutine
+// dump and os.Exit — bypassing testenv.Run's defer and leaking kind clusters.
+// Deleting the platform kind cluster is enough: the cluster-provider sets finalizers
+// on child clusters and cascades their deletion.
+func handleSignals(platformCluster string) {
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	go func() {
+		sig := <-sigs
+		klog.Errorf("e2e suite received %s — deleting platform kind cluster %s and exiting", sig, platformCluster)
+		if out, err := exec.Command("kind", "delete", "cluster", "--name", platformCluster).CombinedOutput(); err != nil {
+			klog.Errorf("kind delete cluster %s: %v\n%s", platformCluster, err, out)
+		}
+		os.Exit(1)
+	}()
 }
 
 func mustVersion() string {
