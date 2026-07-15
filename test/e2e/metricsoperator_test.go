@@ -20,7 +20,9 @@ import (
 	openmcpconditions "github.com/openmcp-project/openmcp-testing/pkg/conditions"
 	"github.com/openmcp-project/openmcp-testing/pkg/providers"
 	"github.com/openmcp-project/openmcp-testing/pkg/resources"
-	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator"
+	apiv1alpha1 "github.com/openmcp-project/service-provider-metrics-operator/api/v1alpha1"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/flux"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/instance"
 )
 
 const testMCP = "test-mcp"
@@ -47,10 +49,16 @@ func TestServiceProvider(t *testing.T) {
 					t.Errorf("failed to create onboarding cluster objects: %v", err)
 					return ctx
 				}
-				for _, obj := range objList.Items {
-					if err := wait.For(openmcpconditions.Match(&obj, onboardingConfig, "Ready", corev1.ConditionTrue),
+				for i := range objList.Items {
+					obj := &objList.Items[i]
+					if err := wait.For(openmcpconditions.Match(obj, onboardingConfig, "Ready", corev1.ConditionTrue),
 						wait.WithTimeout(10*time.Minute)); err != nil {
-						t.Error(err)
+						mo := &apiv1alpha1.MetricsOperator{}
+						if getErr := onboardingConfig.Client().Resources().Get(ctx, obj.GetName(), obj.GetNamespace(), mo); getErr == nil {
+							t.Errorf("%v — MetricsOperator status: conditions=%v resources=%+v", err, mo.Status.Conditions, mo.Status.Resources)
+						} else {
+							t.Error(err)
+						}
 					}
 				}
 				objList.DeepCopyInto(&onboardingList)
@@ -59,6 +67,11 @@ func TestServiceProvider(t *testing.T) {
 		).
 		Assess("platform cluster: OCIRepository and HelmRelease are ready",
 			func(ctx context.Context, t *testing.T, c *envconf.Config) context.Context {
+				platformConfig, err := clusterutils.ConfigByPrefix("platform", corev1.NamespaceDefault)
+				if err != nil {
+					t.Errorf("failed to get platform cluster config: %v", err)
+					return ctx
+				}
 				tenantNamespace, err := libutils.StableMCPNamespace(testMCP, "default")
 				if err != nil {
 					t.Errorf("failed to get tenant namespace: %v", err)
@@ -66,17 +79,17 @@ func TestServiceProvider(t *testing.T) {
 				}
 
 				ociRepo := &sourcev1.OCIRepository{}
-				ociRepo.SetName(metricsoperator.OCIRepositoryName)
+				ociRepo.SetName(flux.OCIRepositoryName)
 				ociRepo.SetNamespace(tenantNamespace)
-				if err := wait.For(openmcpconditions.Match(ociRepo, c, "Ready", corev1.ConditionTrue),
+				if err := wait.For(openmcpconditions.Match(ociRepo, platformConfig, "Ready", corev1.ConditionTrue),
 					wait.WithTimeout(5*time.Minute)); err != nil {
 					t.Errorf("OCIRepository not ready: %v", err)
 				}
 
 				helmRelease := &helmv2.HelmRelease{}
-				helmRelease.SetName(metricsoperator.HelmReleaseName)
+				helmRelease.SetName(flux.HelmReleaseName)
 				helmRelease.SetNamespace(tenantNamespace)
-				if err := wait.For(openmcpconditions.Match(helmRelease, c, "Ready", corev1.ConditionTrue),
+				if err := wait.For(openmcpconditions.Match(helmRelease, platformConfig, "Ready", corev1.ConditionTrue),
 					wait.WithTimeout(5*time.Minute)); err != nil {
 					t.Errorf("HelmRelease not ready: %v", err)
 				}
@@ -90,11 +103,15 @@ func TestServiceProvider(t *testing.T) {
 					t.Error(err)
 					return ctx
 				}
+				obj := &apiv1alpha1.MetricsOperator{}
+				obj.Name = testMCP
+				obj.Namespace = corev1.NamespaceDefault
+				workloadNamespace := instance.Namespace(obj)
 				dep := &appsv1.DeploymentList{}
-				if err := wait.For(conditions.New(workloadConfig.Client().Resources(metricsoperator.DefaultNamespace)).
+				if err := wait.For(conditions.New(workloadConfig.Client().Resources(workloadNamespace)).
 					ResourceListN(dep, 1),
 					wait.WithTimeout(5*time.Minute)); err != nil {
-					t.Errorf("metrics-operator deployment not found in namespace %s: %v", metricsoperator.DefaultNamespace, err)
+					t.Errorf("metrics-operator deployment not found in namespace %s: %v", workloadNamespace, err)
 				}
 				return ctx
 			},

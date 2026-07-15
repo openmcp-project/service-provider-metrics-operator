@@ -1,4 +1,4 @@
-package metricsoperator
+package flux
 
 import (
 	"context"
@@ -140,50 +140,6 @@ func ManageFluxResources(p ManageFluxResourcesParams) {
 	})
 	p.Cluster.AddObject(workloadHelmRelease)
 
-	mcpHelmRelease := resources.NewManagedObject(&helmv2.HelmRelease{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      HelmReleaseName,
-			Namespace: p.Cluster.GetDefaultNamespace(),
-		},
-	}, resources.ManagedObjectContext{
-		ReconcileFunc: func(_ context.Context, o client.Object) error {
-			helmRelease, ok := o.(*helmv2.HelmRelease)
-			if !ok {
-				return fmt.Errorf("expected *helmv2.HelmRelease, got %T", o)
-			}
-			helmRelease.Spec = helmv2.HelmReleaseSpec{
-				Interval: metav1.Duration{Duration: p.Interval},
-				ChartRef: &helmv2.CrossNamespaceSourceReference{
-					Kind:      "OCIRepository",
-					Name:      OCIRepositoryName,
-					Namespace: p.Cluster.GetDefaultNamespace(),
-				},
-				KubeConfig: &meta.KubeConfigReference{
-					SecretRef: &meta.SecretKeyReference{
-						Name: p.ClusterContext.WorkloadAccessSecretKey.Name,
-						Key:  "kubeconfig",
-					},
-				},
-				Install: &helmv2.Install{
-					Remediation: &helmv2.InstallRemediation{
-						Retries: 3,
-					},
-					CreateNamespace: true,
-				},
-				DriftDetection: &helmv2.DriftDetection{
-					Mode: helmv2.DriftDetectionEnabled,
-				},
-				Values:           p.RequestedVersion.HelmValues,
-				TargetNamespace:  p.WorkloadNamespace,
-				StorageNamespace: p.WorkloadNamespace,
-			}
-			return nil
-		},
-		DependsOn:      []resources.ManagedObject{ociRepo},
-		DeletionPolicy: resources.Delete,
-		StatusFunc:     FluxStatus,
-	})
-	p.Cluster.AddObject(mcpHelmRelease)
 }
 
 // FluxStatus indicates whether the given object is in phase terminating, pending or ready.

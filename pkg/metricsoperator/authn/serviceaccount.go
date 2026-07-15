@@ -15,7 +15,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -60,7 +59,7 @@ func generateToken(ctx context.Context, mcp *clusters.Cluster, cfg *rest.Config,
 
 	req := &authenticationv1.TokenRequest{
 		Spec: authenticationv1.TokenRequestSpec{
-			ExpirationSeconds: ptr.To(int64(expiration.Seconds())),
+			ExpirationSeconds: new(int64(expiration.Seconds())),
 		},
 	}
 	if err := mcp.Client().SubResource("token").Create(ctx, sa, req); err != nil {

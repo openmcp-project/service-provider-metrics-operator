@@ -37,9 +37,9 @@ import (
 	libutils "github.com/openmcp-project/openmcp-operator/lib/utils"
 
 	apiv1alpha1 "github.com/openmcp-project/service-provider-metrics-operator/api/v1alpha1"
-	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/authn"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/authz"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/flux"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/helm"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/instance"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/objectutils"
@@ -119,9 +119,6 @@ func userErrorMessage(err error) string {
 	if errors.Is(err, ErrManagedResources) {
 		errorMessages = append(errorMessages, ErrManagedResources.Error())
 	}
-	if errors.Is(err, metricsoperator.ErrOrphanCleanup) {
-		errorMessages = append(errorMessages, metricsoperator.ErrOrphanCleanup.Error())
-	}
 	return strings.Join(errorMessages, "; ")
 }
 
@@ -147,7 +144,7 @@ func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj
 
 	platformCluster := resources.NewManagedCluster(r.PlatformCluster, r.PlatformCluster.RESTConfig(), tenantNamespace, resources.PlatformCluster)
 	workloadCluster := resources.NewManagedCluster(clusters.WorkloadCluster, clusters.WorkloadCluster.RESTConfig(), instance.Namespace(obj), resources.WorkloadCluster)
-	mcpCluster := resources.NewManagedCluster(clusters.MCPCluster, clusters.MCPCluster.RESTConfig(), metricsoperator.DefaultNamespace, resources.ManagedControlPlane)
+	mcpCluster := resources.NewManagedCluster(clusters.MCPCluster, clusters.MCPCluster.RESTConfig(), flux.DefaultNamespace, resources.ManagedControlPlane)
 
 	metricsNamespace := mcpCluster.GetDefaultNamespace()
 	if helmValues.NamespaceOverride != "" {
@@ -175,34 +172,20 @@ func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj
 	}
 	authz.Configure(mcpCluster, mcpServiceAccount)
 
-	prefixedChartPullSecret, err := r.managePullSecrets(platformCluster, workloadCluster, helmValues, moVersion, tenantNamespace, metricsNamespace)
-	if err != nil {
-		return nil, err
-	}
-
-	metricsoperator.ManageFluxResources(metricsoperator.ManageFluxResourcesParams{
-		Cluster:             platformCluster,
-		MCPNamespace:        metricsNamespace,
-		WorkloadNamespace:   instance.Namespace(obj),
-		ChartPullSecretName: prefixedChartPullSecret,
-		Obj:                 obj,
-		Interval:            pc.PollInterval(),
-		ClusterContext:      clusters,
-		RequestedVersion:    moVersion,
+	flux.ManageFluxResources(flux.ManageFluxResourcesParams{
+		Cluster:           platformCluster,
+		MCPNamespace:      metricsNamespace,
+		WorkloadNamespace: instance.Namespace(obj),
+		Obj:               obj,
+		Interval:          pc.PollInterval(),
+		ClusterContext:    clusters,
+		RequestedVersion:  moVersion,
 	})
 
 	mgr := resources.NewManager()
 	mgr.AddCluster(mcpCluster)
 	mgr.AddCluster(workloadCluster)
 	mgr.AddCluster(platformCluster)
-
-	platformSecretCleaner := metricsoperator.NewSecretCleaner(platformCluster, tenantNamespace, []corev1.LocalObjectReference{
-		{Name: prefixedChartPullSecret},
-	})
-	workloadSecretCleaner := metricsoperator.NewSecretCleaner(workloadCluster, metricsNamespace, helmValues.Global.ImagePullSecrets)
-
-	mgr.AddCleaner(platformSecretCleaner)
-	mgr.AddCleaner(workloadSecretCleaner)
 
 	return mgr, nil
 }
@@ -255,56 +238,6 @@ func allResourcesReady(resources []apiv1alpha1.ManagedResource) bool {
 		}
 	}
 	return true
-}
-
-// IsReferencedSecret returns true if the given secret should trigger reconciliation.
-func (r *MetricsOperatorReconciler) IsReferencedSecret(_ context.Context, secret *corev1.Secret, pc *apiv1alpha1.ProviderConfig) bool {
-	if pc == nil {
-		return false
-	}
-	for _, version := range pc.Spec.Versions {
-		if version.ChartPullSecret == secret.Name {
-			return true
-		}
-		helmValues, err := helm.ExtractHelmValues(version.HelmValues)
-		if err != nil {
-			continue
-		}
-		for _, ref := range helmValues.Global.ImagePullSecrets {
-			if ref.Name == secret.Name {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func (r *MetricsOperatorReconciler) managePullSecrets(
-	platformCluster resources.ManagedCluster,
-	workloadCluster resources.ManagedCluster,
-	helmValues *helm.HelmValues,
-	version apiv1alpha1.MetricsOperatorVersion,
-	tenantNamespace, metricsNamespace string,
-) (string, error) {
-	metricsoperator.ManagePullSecrets(workloadCluster, helmValues.Global.ImagePullSecrets, metricsoperator.SecretCopyConfig{
-		SourceClient:    platformCluster.GetClient(),
-		SourceNamespace: r.PodNamespace,
-		TargetNamespace: metricsNamespace,
-	})
-	if version.ChartPullSecret == "" {
-		return "", nil
-	}
-	prefixed, err := metricsoperator.PrefixSecretName(version.ChartPullSecret)
-	if err != nil {
-		return "", fmt.Errorf("error generating secret name: %w", err)
-	}
-	metricsoperator.ManagePullSecret(platformCluster, corev1.LocalObjectReference{Name: version.ChartPullSecret}, metricsoperator.SecretCopyConfig{
-		SourceClient:    platformCluster.GetClient(),
-		SourceNamespace: r.PodNamespace,
-		TargetNamespace: tenantNamespace,
-		TargetName:      prefixed,
-	})
-	return prefixed, nil
 }
 
 func (r *MetricsOperatorReconciler) ensureInstanceID(ctx context.Context, obj *apiv1alpha1.MetricsOperator) error {
