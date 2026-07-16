@@ -385,7 +385,7 @@ func main() {
 
 	clusterAccessReconciler := advanced.NewClusterAccessReconciler(platformCluster.Client(), providerName)
 	if debugEnabled() {
-		clusterAccessReconciler = localaccess.NewLocalAdvancedClusterAccessReconciler(clusterAccessReconciler)
+		clusterAccessReconciler = localaccess.NewLocalAdvancedClusterAccessReconciler(clusterAccessReconciler).WithWorkloadCluster()
 	}
 
 	clusterAccessReconciler.
