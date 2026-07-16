@@ -2,16 +2,20 @@ package e2e
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/tools/clientcmd"
+	"sigs.k8s.io/e2e-framework/klient"
 	"sigs.k8s.io/e2e-framework/klient/wait"
 	"sigs.k8s.io/e2e-framework/klient/wait/conditions"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/features"
+	kindcluster "sigs.k8s.io/kind/pkg/cluster"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
@@ -98,14 +102,35 @@ func TestServiceProvider(t *testing.T) {
 		).
 		Assess("workload cluster: metrics-operator deployment exists",
 			func(ctx context.Context, t *testing.T, c *envconf.Config) context.Context {
-				workloadConfig, err := clusterutils.ConfigByPrefix("workload", corev1.NamespaceDefault)
+				platformConfig, err := clusterutils.ConfigByPrefix("platform", corev1.NamespaceDefault)
+				if err != nil {
+					t.Errorf("failed to get platform cluster config: %v", err)
+					return ctx
+				}
+				tenantNamespace, err := libutils.StableMCPNamespace(testMCP, corev1.NamespaceDefault)
+				if err != nil {
+					t.Errorf("failed to get tenant namespace: %v", err)
+					return ctx
+				}
+				workloadConfig, err := configForKindClusterFromClusterStatus(ctx, platformConfig, tenantNamespace, "workload")
 				if err != nil {
 					t.Error(err)
 					return ctx
 				}
+				onboardingConfig, err := clusterutils.OnboardingConfig()
+				if err != nil {
+					t.Error(err)
+					return ctx
+				}
+				if err := apiv1alpha1.AddToScheme(onboardingConfig.Client().Resources().GetScheme()); err != nil {
+					t.Errorf("failed to register MetricsOperator scheme: %v", err)
+					return ctx
+				}
 				obj := &apiv1alpha1.MetricsOperator{}
-				obj.Name = testMCP
-				obj.Namespace = corev1.NamespaceDefault
+				if err := onboardingConfig.Client().Resources().Get(ctx, testMCP, corev1.NamespaceDefault, obj); err != nil {
+					t.Errorf("failed to get MetricsOperator %s/%s: %v", corev1.NamespaceDefault, testMCP, err)
+					return ctx
+				}
 				workloadNamespace := instance.Namespace(obj)
 				dep := &appsv1.DeploymentList{}
 				if err := wait.For(conditions.New(workloadConfig.Client().Resources(workloadNamespace)).
@@ -131,4 +156,33 @@ func TestServiceProvider(t *testing.T) {
 		}).
 		Teardown(providers.DeleteMCP(testMCP, wait.WithTimeout(5*time.Minute)))
 	testenv.Test(t, basicProviderTest.Feature())
+}
+
+func configForKindClusterFromClusterStatus(ctx context.Context, platformConfig *envconf.Config, namespace, name string) (*envconf.Config, error) {
+	cluster := &unstructured.Unstructured{}
+	cluster.SetAPIVersion("clusters.openmcp.cloud/v1alpha1")
+	cluster.SetKind("Cluster")
+	if err := platformConfig.Client().Resources().Get(ctx, name, namespace, cluster); err != nil {
+		return nil, fmt.Errorf("failed to get Cluster %s/%s: %w", namespace, name, err)
+	}
+	kindClusterName, ok, err := unstructured.NestedString(cluster.Object, "status", "providerStatus", "kindClusterName")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read Cluster provider status: %w", err)
+	}
+	if !ok || kindClusterName == "" {
+		return nil, fmt.Errorf("Cluster %s/%s has no kindClusterName in provider status", namespace, name)
+	}
+	kubeConfig, err := kindcluster.NewProvider().KubeConfig(kindClusterName, false)
+	if err != nil {
+		return nil, err
+	}
+	restConfig, err := clientcmd.RESTConfigFromKubeConfig([]byte(kubeConfig))
+	if err != nil {
+		return nil, err
+	}
+	client, err := klient.New(restConfig)
+	if err != nil {
+		return nil, err
+	}
+	return envconf.New().WithClient(client).WithNamespace(corev1.NamespaceDefault), nil
 }
