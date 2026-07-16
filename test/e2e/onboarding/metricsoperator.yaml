@@ -3,4 +3,4 @@ kind: MetricsOperator
 metadata:
   name: test-mcp
 spec:
-  version: "v0.11.3"
+  version: "v0.13.0"
