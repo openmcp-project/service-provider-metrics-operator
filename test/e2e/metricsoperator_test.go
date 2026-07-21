@@ -2,34 +2,30 @@ package e2e
 
 import (
 	"context"
-	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/client-go/tools/clientcmd"
-	"sigs.k8s.io/e2e-framework/klient"
 	"sigs.k8s.io/e2e-framework/klient/wait"
 	"sigs.k8s.io/e2e-framework/klient/wait/conditions"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/features"
-	kindcluster "sigs.k8s.io/kind/pkg/cluster"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	libutils "github.com/openmcp-project/openmcp-operator/lib/utils"
 	"github.com/openmcp-project/openmcp-testing/pkg/clusterutils"
 	openmcpconditions "github.com/openmcp-project/openmcp-testing/pkg/conditions"
-	"github.com/openmcp-project/openmcp-testing/pkg/providers"
 	"github.com/openmcp-project/openmcp-testing/pkg/resources"
 	apiv1alpha1 "github.com/openmcp-project/service-provider-metrics-operator/api/v1alpha1"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/flux"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/instance"
 )
 
-const testMCP = "test-mcp"
+var testMCP = ""
 
 func TestServiceProvider(t *testing.T) {
 	var onboardingList unstructured.UnstructuredList
@@ -40,7 +36,36 @@ func TestServiceProvider(t *testing.T) {
 			}
 			return ctx
 		}).
-		Setup(providers.CreateMCP(testMCP)).
+		Setup(func(ctx context.Context, t *testing.T, c *envconf.Config) context.Context {
+			// Create the MCP ControlPlane on the onboarding cluster.
+			// Retry until the ControlPlane CRD is installed by openmcp-operator init.
+			onboardingConfig, err := clusterutils.OnboardingConfig()
+			if err != nil {
+				t.Error(err)
+				return ctx
+			}
+			var objList *unstructured.UnstructuredList
+			if err := wait.For(func(ctx context.Context) (bool, error) {
+				var createErr error
+				objList, createErr = resources.CreateObjectsFromDir(ctx, onboardingConfig, "mcp")
+				if createErr != nil {
+					if strings.Contains(createErr.Error(), "no matches for") {
+						return false, nil
+					}
+					return false, createErr
+				}
+				return true, nil
+			}, wait.WithTimeout(5*time.Minute), wait.WithInterval(5*time.Second)); err != nil {
+				t.Errorf("failed to create mcp objects: %v", err)
+				return ctx
+			}
+			for _, obj := range objList.Items {
+				if obj.GetKind() == "ControlPlane" {
+					testMCP = obj.GetName()
+				}
+			}
+			return ctx
+		}).
 		Assess("create MetricsOperator and verify Ready",
 			func(ctx context.Context, t *testing.T, c *envconf.Config) context.Context {
 				onboardingConfig, err := clusterutils.OnboardingConfig()
@@ -48,15 +73,30 @@ func TestServiceProvider(t *testing.T) {
 					t.Error(err)
 					return ctx
 				}
-				objList, err := resources.CreateObjectsFromDir(ctx, onboardingConfig, "onboarding")
-				if err != nil {
+				var objList *unstructured.UnstructuredList
+				if err := wait.For(func(ctx context.Context) (bool, error) {
+					var createErr error
+					objList, createErr = resources.CreateObjectsFromDir(ctx, onboardingConfig, "onboarding")
+					if createErr != nil {
+						if strings.Contains(createErr.Error(), "no matches for") {
+							return false, nil
+						}
+						return false, createErr
+					}
+					return true, nil
+				}, wait.WithTimeout(5*time.Minute), wait.WithInterval(5*time.Second)); err != nil {
 					t.Errorf("failed to create onboarding cluster objects: %v", err)
 					return ctx
 				}
 				for i := range objList.Items {
 					obj := &objList.Items[i]
-					if err := wait.For(openmcpconditions.Match(obj, onboardingConfig, "Ready", corev1.ConditionTrue),
-						wait.WithTimeout(10*time.Minute)); err != nil {
+					conditionType := "Ready"
+					if obj.GetKind() == "ControlPlane" {
+						testMCP = obj.GetName()
+						conditionType = "AllAccessReady"
+					}
+					if err := wait.For(openmcpconditions.Match(obj, onboardingConfig, conditionType, corev1.ConditionTrue),
+						wait.WithTimeout(5*time.Minute)); err != nil {
 						mo := &apiv1alpha1.MetricsOperator{}
 						if getErr := onboardingConfig.Client().Resources().Get(ctx, obj.GetName(), obj.GetNamespace(), mo); getErr == nil {
 							t.Errorf("%v — MetricsOperator status: conditions=%v resources=%+v", err, mo.Status.Conditions, mo.Status.Resources)
@@ -102,17 +142,7 @@ func TestServiceProvider(t *testing.T) {
 		).
 		Assess("workload cluster: metrics-operator deployment exists",
 			func(ctx context.Context, t *testing.T, c *envconf.Config) context.Context {
-				platformConfig, err := clusterutils.ConfigByPrefix("platform", corev1.NamespaceDefault)
-				if err != nil {
-					t.Errorf("failed to get platform cluster config: %v", err)
-					return ctx
-				}
-				tenantNamespace, err := libutils.StableMCPNamespace(testMCP, corev1.NamespaceDefault)
-				if err != nil {
-					t.Errorf("failed to get tenant namespace: %v", err)
-					return ctx
-				}
-				workloadConfig, err := configForKindClusterFromClusterStatus(ctx, platformConfig, tenantNamespace, "workload")
+				workloadConfig, err := clusterutils.ConfigByPrefix("workload", corev1.NamespaceDefault)
 				if err != nil {
 					t.Error(err)
 					return ctx
@@ -148,41 +178,11 @@ func TestServiceProvider(t *testing.T) {
 				return ctx
 			}
 			for _, obj := range onboardingList.Items {
-				if err := resources.DeleteObject(ctx, onboardingConfig, &obj, wait.WithTimeout(2*time.Minute)); err != nil {
-					t.Errorf("failed to delete onboarding object: %v", err)
-				}
+				// Don't wait for deletion — the SP finalizer may block if the mcp cluster is gone.
+				// The cleanup-e2e-clusters task will handle the rest.
+				_ = onboardingConfig.Client().Resources().Delete(ctx, &obj)
 			}
 			return ctx
-		}).
-		Teardown(providers.DeleteMCP(testMCP, wait.WithTimeout(5*time.Minute)))
+		})
 	testenv.Test(t, basicProviderTest.Feature())
-}
-
-func configForKindClusterFromClusterStatus(ctx context.Context, platformConfig *envconf.Config, namespace, name string) (*envconf.Config, error) {
-	cluster := &unstructured.Unstructured{}
-	cluster.SetAPIVersion("clusters.openmcp.cloud/v1alpha1")
-	cluster.SetKind("Cluster")
-	if err := platformConfig.Client().Resources().Get(ctx, name, namespace, cluster); err != nil {
-		return nil, fmt.Errorf("failed to get Cluster %s/%s: %w", namespace, name, err)
-	}
-	kindClusterName, ok, err := unstructured.NestedString(cluster.Object, "status", "providerStatus", "kindClusterName")
-	if err != nil {
-		return nil, fmt.Errorf("failed to read Cluster provider status: %w", err)
-	}
-	if !ok || kindClusterName == "" {
-		return nil, fmt.Errorf("Cluster %s/%s has no kindClusterName in provider status", namespace, name)
-	}
-	kubeConfig, err := kindcluster.NewProvider().KubeConfig(kindClusterName, false)
-	if err != nil {
-		return nil, err
-	}
-	restConfig, err := clientcmd.RESTConfigFromKubeConfig([]byte(kubeConfig))
-	if err != nil {
-		return nil, err
-	}
-	client, err := klient.New(restConfig)
-	if err != nil {
-		return nil, err
-	}
-	return envconf.New().WithClient(client).WithNamespace(corev1.NamespaceDefault), nil
 }

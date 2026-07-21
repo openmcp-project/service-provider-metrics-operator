@@ -3,9 +3,7 @@ module github.com/openmcp-project/service-provider-metrics-operator
 go 1.26.5
 
 require (
-	github.com/fluxcd/flux2/v2 v2.9.2
 	github.com/fluxcd/helm-controller/api v1.6.2
-	github.com/fluxcd/kustomize-controller/api v1.9.3
 	github.com/fluxcd/pkg/apis/meta v1.31.0
 	github.com/fluxcd/pkg/runtime v0.111.0
 	github.com/fluxcd/source-controller/api v1.9.3
@@ -18,7 +16,6 @@ require (
 	k8s.io/apimachinery v0.36.2
 	k8s.io/client-go v0.36.2
 	sigs.k8s.io/controller-runtime v0.24.1
-	sigs.k8s.io/kind v0.32.0
 )
 
 require (
@@ -29,6 +26,8 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
+	github.com/fluxcd/flux2/v2 v2.9.2 // indirect
+	github.com/fluxcd/kustomize-controller/api v1.9.3 // indirect
 	github.com/fluxcd/pkg/apis/acl v0.10.0 // indirect
 	github.com/fluxcd/pkg/apis/kustomize v1.20.0 // indirect
 	github.com/fluxcd/pkg/kustomize v1.35.3 // indirect
@@ -75,6 +74,7 @@ require (
 	k8s.io/apiserver v0.36.2 // indirect
 	k8s.io/streaming v0.36.2 // indirect
 	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.34.0 // indirect
+	sigs.k8s.io/kind v0.32.0 // indirect
 	sigs.k8s.io/kustomize/api v0.21.1 // indirect
 	sigs.k8s.io/kustomize/kyaml v0.21.1 // indirect
 )
@@ -100,7 +100,7 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/openmcp-project/openmcp-testing v1.0.1
+	github.com/openmcp-project/openmcp-testing v1.2.1-0.20260721142741-761a484eeeca
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
@@ -135,5 +135,5 @@ require (
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.0 // indirect
-	sigs.k8s.io/yaml v1.6.0
+	sigs.k8s.io/yaml v1.6.0 // indirect
 )
