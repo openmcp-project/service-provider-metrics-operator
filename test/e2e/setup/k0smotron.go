@@ -359,13 +359,13 @@ func (p *K0smotronClusterProvider) List() ([]string, error) {
 		if !strings.HasSuffix(s.Name, "-kubeconfig") {
 			continue
 		}
-		parts := strings.SplitN(s.Name, "-", 2)
-		if len(parts) == 0 || parts[0] == "" {
+		clusterName := strings.TrimSuffix(s.Name, "-kubeconfig")
+		if clusterName == "" {
 			continue
 		}
-		if !seen[parts[0]] {
-			seen[parts[0]] = true
-			names = append(names, parts[0])
+		if !seen[clusterName] {
+			seen[clusterName] = true
+			names = append(names, clusterName)
 		}
 	}
 	return names, nil

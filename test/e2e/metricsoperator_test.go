@@ -158,15 +158,15 @@ func TestServiceProvider(t *testing.T) {
 		).
 		Assess("apply Metric to MCP cluster",
 			func(ctx context.Context, t *testing.T, c *envconf.Config) context.Context {
-				mcpConfig, err := clusterutils.ConfigByPrefix("mcp", corev1.NamespaceDefault)
+				platformConfig, err := clusterutils.ConfigByPrefix("platform", corev1.NamespaceDefault)
 				if err != nil {
-					t.Errorf("failed to get MCP cluster config: %v", err)
+					t.Errorf("failed to get platform cluster config: %v", err)
 					return ctx
 				}
 				// The Metric CRD is installed on the MCP cluster by the metrics-operator once
 				// it is running, so retry until the CRD and the MCP cluster are available.
 				if err := wait.For(func(ctx context.Context) (bool, error) {
-					_, createErr := clusterutils.ImportToMCPCluster(ctx, mcpConfig, testMCP, "mcp")
+					_, createErr := clusterutils.ImportToMCPCluster(ctx, platformConfig, testMCP, "mcp")
 					if createErr != nil {
 						if strings.Contains(createErr.Error(), "no matches for") ||
 							strings.Contains(createErr.Error(), "not found") {
