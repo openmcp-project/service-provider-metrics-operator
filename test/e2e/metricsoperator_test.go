@@ -3,9 +3,11 @@ package e2e
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"golang.org/x/sync/errgroup"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -36,36 +38,6 @@ func TestServiceProvider(t *testing.T) {
 			}
 			return ctx
 		}).
-		Setup(func(ctx context.Context, t *testing.T, c *envconf.Config) context.Context {
-			// Create the MCP ControlPlane on the onboarding cluster.
-			// Retry until the ControlPlane CRD is installed by openmcp-operator init.
-			onboardingConfig, err := clusterutils.OnboardingConfig()
-			if err != nil {
-				t.Error(err)
-				return ctx
-			}
-			var objList *unstructured.UnstructuredList
-			if err := wait.For(func(ctx context.Context) (bool, error) {
-				var createErr error
-				objList, createErr = resources.CreateObjectsFromDir(ctx, onboardingConfig, "mcp")
-				if createErr != nil {
-					if strings.Contains(createErr.Error(), "no matches for") {
-						return false, nil
-					}
-					return false, createErr
-				}
-				return true, nil
-			}, wait.WithTimeout(5*time.Minute), wait.WithInterval(5*time.Second)); err != nil {
-				t.Errorf("failed to create mcp objects: %v", err)
-				return ctx
-			}
-			for _, obj := range objList.Items {
-				if obj.GetKind() == "ControlPlane" {
-					testMCP = obj.GetName()
-				}
-			}
-			return ctx
-		}).
 		Assess("create MetricsOperator and verify Ready",
 			func(ctx context.Context, t *testing.T, c *envconf.Config) context.Context {
 				onboardingConfig, err := clusterutils.OnboardingConfig()
@@ -89,22 +61,32 @@ func TestServiceProvider(t *testing.T) {
 					return ctx
 				}
 				for i := range objList.Items {
+					if objList.Items[i].GetKind() == "ControlPlane" {
+						testMCP = objList.Items[i].GetName()
+					}
+				}
+				var wg sync.WaitGroup
+				for i := range objList.Items {
 					obj := &objList.Items[i]
 					conditionType := "Ready"
 					if obj.GetKind() == "ControlPlane" {
-						testMCP = obj.GetName()
 						conditionType = "AllAccessReady"
 					}
-					if err := wait.For(openmcpconditions.Match(obj, onboardingConfig, conditionType, corev1.ConditionTrue),
-						wait.WithTimeout(5*time.Minute)); err != nil {
-						mo := &apiv1alpha1.MetricsOperator{}
-						if getErr := onboardingConfig.Client().Resources().Get(ctx, obj.GetName(), obj.GetNamespace(), mo); getErr == nil {
-							t.Errorf("%v — MetricsOperator status: conditions=%v resources=%+v", err, mo.Status.Conditions, mo.Status.Resources)
-						} else {
-							t.Error(err)
+					wg.Add(1)
+					go func(obj *unstructured.Unstructured, conditionType string) {
+						defer wg.Done()
+						if err := wait.For(openmcpconditions.Match(obj, onboardingConfig, conditionType, corev1.ConditionTrue),
+							wait.WithTimeout(5*time.Minute)); err != nil {
+							mo := &apiv1alpha1.MetricsOperator{}
+							if getErr := onboardingConfig.Client().Resources().Get(ctx, obj.GetName(), obj.GetNamespace(), mo); getErr == nil {
+								t.Errorf("%v — MetricsOperator status: conditions=%v resources=%+v", err, mo.Status.Conditions, mo.Status.Resources)
+							} else {
+								t.Error(err)
+							}
 						}
-					}
+					}(obj, conditionType)
 				}
+				wg.Wait()
 				objList.DeepCopyInto(&onboardingList)
 				return ctx
 			},
@@ -122,20 +104,23 @@ func TestServiceProvider(t *testing.T) {
 					return ctx
 				}
 
-				ociRepo := &sourcev1.OCIRepository{}
-				ociRepo.SetName(flux.OCIRepositoryName)
-				ociRepo.SetNamespace(tenantNamespace)
-				if err := wait.For(openmcpconditions.Match(ociRepo, platformConfig, "Ready", corev1.ConditionTrue),
-					wait.WithTimeout(5*time.Minute)); err != nil {
-					t.Errorf("OCIRepository not ready: %v", err)
-				}
-
-				helmRelease := &helmv2.HelmRelease{}
-				helmRelease.SetName(flux.HelmReleaseName)
-				helmRelease.SetNamespace(tenantNamespace)
-				if err := wait.For(openmcpconditions.Match(helmRelease, platformConfig, "Ready", corev1.ConditionTrue),
-					wait.WithTimeout(5*time.Minute)); err != nil {
-					t.Errorf("HelmRelease not ready: %v", err)
+				g, gctx := errgroup.WithContext(ctx)
+				g.Go(func() error {
+					ociRepo := &sourcev1.OCIRepository{}
+					ociRepo.SetName(flux.OCIRepositoryName)
+					ociRepo.SetNamespace(tenantNamespace)
+					return wait.For(openmcpconditions.Match(ociRepo, platformConfig, "Ready", corev1.ConditionTrue),
+						wait.WithContext(gctx), wait.WithTimeout(5*time.Minute))
+				})
+				g.Go(func() error {
+					helmRelease := &helmv2.HelmRelease{}
+					helmRelease.SetName(flux.HelmReleaseName)
+					helmRelease.SetNamespace(tenantNamespace)
+					return wait.For(openmcpconditions.Match(helmRelease, platformConfig, "Ready", corev1.ConditionTrue),
+						wait.WithContext(gctx), wait.WithTimeout(5*time.Minute))
+				})
+				if err := g.Wait(); err != nil {
+					t.Errorf("platform cluster resources not ready: %v", err)
 				}
 				return ctx
 			},
@@ -167,6 +152,31 @@ func TestServiceProvider(t *testing.T) {
 					ResourceListN(dep, 1),
 					wait.WithTimeout(5*time.Minute)); err != nil {
 					t.Errorf("metrics-operator deployment not found in namespace %s: %v", workloadNamespace, err)
+				}
+				return ctx
+			},
+		).
+		Assess("apply Metric to MCP cluster",
+			func(ctx context.Context, t *testing.T, c *envconf.Config) context.Context {
+				mcpConfig, err := clusterutils.ConfigByPrefix("mcp", corev1.NamespaceDefault)
+				if err != nil {
+					t.Errorf("failed to get MCP cluster config: %v", err)
+					return ctx
+				}
+				// The Metric CRD is installed on the MCP cluster by the metrics-operator once
+				// it is running, so retry until the CRD and the MCP cluster are available.
+				if err := wait.For(func(ctx context.Context) (bool, error) {
+					_, createErr := clusterutils.ImportToMCPCluster(ctx, mcpConfig, testMCP, "mcp")
+					if createErr != nil {
+						if strings.Contains(createErr.Error(), "no matches for") ||
+							strings.Contains(createErr.Error(), "not found") {
+							return false, nil
+						}
+						return false, createErr
+					}
+					return true, nil
+				}, wait.WithTimeout(5*time.Minute), wait.WithInterval(5*time.Second)); err != nil {
+					t.Errorf("failed to create mcp-workload objects on MCP cluster: %v", err)
 				}
 				return ctx
 			},
