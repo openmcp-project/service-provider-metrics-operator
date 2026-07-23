@@ -165,6 +165,8 @@ github.com/openmcp-project/openmcp-operator/api v1.3.0 h1:RgetVDqslJPD7/nb65AbqW
 github.com/openmcp-project/openmcp-operator/api v1.3.0/go.mod h1:GMCkaGUND5Qu3zTNjpYtR44her8gcOksHkrJu5isL6I=
 github.com/openmcp-project/openmcp-operator/lib v1.1.0 h1:lNRDa9+ZPQeAWJ93PQpjG2zMU1oufBMDV689PXkHtf8=
 github.com/openmcp-project/openmcp-operator/lib v1.1.0/go.mod h1:XrN27weczWRbIvncCEAiIghmuSBSVCHbbA72X0CWvDU=
+github.com/openmcp-project/openmcp-testing v1.2.1-0.20260721142741-761a484eeeca h1:UsHz1Y8qWt++y5ohlOAE/XPs4H49PZUQy21WaZNqtdA=
+github.com/openmcp-project/openmcp-testing v1.2.1-0.20260721142741-761a484eeeca/go.mod h1:Pn3kwzZKQvmNLdRudBaHUtFWhRQom24fx0iwFHJX7AI=
 github.com/pelletier/go-toml v1.9.5 h1:4yBQzkHv+7BHq2PQUZF3Mx0IYxG7LsP222s7Agd3ve8=
 github.com/pelletier/go-toml v1.9.5/go.mod h1:u1nR/EPcESfeI/szUZKdtJ0xRNbUoANCkoOuaOx1Y+c=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=
