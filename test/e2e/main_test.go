@@ -48,7 +48,8 @@ func TestMain(m *testing.M) {
 			{
 				Name: "k0smotron",
 				// renovate: datasource=docker depName=ghcr.io/openmcp-project/images/cluster-provider-k0smotron
-				Image: "ghcr.io/openmcp-project/images/cluster-provider-k0smotron:v0.2.3",
+				Image:              "ghcr.io/openmcp-project/images/cluster-provider-k0smotron:v0.2.3",
+				LoadImageToCluster: true,
 			},
 		},
 		ServiceProviders: []providers.ServiceProviderSetup{
