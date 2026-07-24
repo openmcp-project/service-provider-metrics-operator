@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -57,13 +56,6 @@ func TestMain(m *testing.M) {
 	testenv = env.NewWithConfig(envconf.New().WithNamespace(openmcp.Namespace))
 	openmcp.Bootstrap(testenv)
 
-	var watchdogCancel context.CancelFunc
-	testenv.Finish(func(ctx context.Context, cfg *envconf.Config) (context.Context, error) {
-		if watchdogCancel != nil {
-			watchdogCancel()
-		}
-		return ctx, nil
-	})
 	os.Exit(testenv.Run(m))
 }
 
