@@ -26,16 +26,8 @@ tasks:
       ARCH:
         sh: uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/'
 
-  pull-e2e-images:
-    desc: "Pull private images needed for e2e tests (remove once k0smotron repo is public)"
-    cmds:
-      - mkdir -p /tmp/docker-config && echo '{"auths":{"ghcr.io":{"auth":"'$(printf "x-access-token:$GITHUB_TOKEN" | base64 -w0)'"}}}' > /tmp/docker-config/config.json
-      - DOCKER_CONFIG=/tmp/docker-config docker pull ghcr.io/openmcp-project/images/cluster-provider-k0smotron:v0.2.3
-
   test-e2e:
     desc: "Build image and run e2e tests"
     cmds:
       - task: build:img:build-test
-      - task: pull-e2e-images
-      - sudo sysctl -w fs.inotify.max_user_instances=8192 || true
       - cmd: go test -v -timeout 20m ./test/e2e/...
