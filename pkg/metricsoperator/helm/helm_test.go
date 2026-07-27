@@ -10,67 +10,61 @@ import (
 
 func TestExtractHelmValues(t *testing.T) {
 	tests := []struct {
-		name string // description of this test case
-		// Named input parameters for target function.
+		name    string
 		values  *apiextensionsv1.JSON
 		want    *HelmValues
 		wantErr bool
 	}{
 		{
-			name: "Extract Namespace",
+			name: "extract namespaceOverride",
 			values: &apiextensionsv1.JSON{
-				Raw: []byte(`{"namespaceOverride": "eso-system"}`),
+				Raw: []byte(`{"namespaceOverride": "custom-ns"}`),
 			},
-			want: &HelmValues{
-				NamespaceOverride: "eso-system",
-			},
+			want:    &HelmValues{NamespaceOverride: "custom-ns"},
 			wantErr: false,
 		},
 		{
-			name: "Extract ImagePullSecrets",
+			name: "extract top-level imagePullSecrets",
 			values: &apiextensionsv1.JSON{
-				Raw: []byte(`{"global": {"imagePullSecrets": [{"name": "test"}]}}`),
+				Raw: []byte(`{"imagePullSecrets": [{"name": "my-secret"}]}`),
 			},
 			want: &HelmValues{
 				Global: Global{
-					ImagePullSecrets: []corev1.LocalObjectReference{
-						{
-							Name: "test",
-						},
-					},
+					ImagePullSecrets: []corev1.LocalObjectReference{{Name: "my-secret"}},
 				},
 			},
 			wantErr: false,
 		},
 		{
-			name: "Ignore unknown values",
+			name: "ignore unknown values",
 			values: &apiextensionsv1.JSON{
-				Raw: []byte(`{"replicaCount": 1}`),
+				Raw: []byte(`{"replicaCount": 2}`),
 			},
 			want:    &HelmValues{},
 			wantErr: false,
 		},
 		{
-			name: "Error on invalid JSON",
-			values: &apiextensionsv1.JSON{
-				Raw: []byte("invalid json"),
-			},
+			name:    "nil values returns empty",
+			values:  nil,
 			want:    &HelmValues{},
+			wantErr: false,
+		},
+		{
+			name: "invalid json returns error",
+			values: &apiextensionsv1.JSON{
+				Raw: []byte("not-json"),
+			},
 			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, gotErr := ExtractHelmValues(tt.values)
-			if gotErr != nil {
-				if !tt.wantErr {
-					t.Errorf("ExtractHelmValues() failed: %v", gotErr)
-				}
+			got, err := ExtractHelmValues(tt.values)
+			if tt.wantErr {
+				assert.Error(t, err)
 				return
 			}
-			if tt.wantErr {
-				t.Fatal("ExtractHelmValues() succeeded unexpectedly")
-			}
+			assert.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})
 	}

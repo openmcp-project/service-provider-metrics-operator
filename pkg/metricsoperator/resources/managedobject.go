@@ -59,12 +59,11 @@ type Status struct {
 	Location v1alpha1.ResourceLocation
 }
 
-// NewManagedObject creates a new ManagedObject instances to manage the given client.Object.
+// NewManagedObject creates a new ManagedObject instance to manage the given client.Object.
 func NewManagedObject(o client.Object, moc ManagedObjectContext) ManagedObject {
 	if moc.DeletionPolicy == "" {
 		moc.DeletionPolicy = Delete
 	}
-
 	return &managedObject{
 		object:         o,
 		reconcileFunc:  moc.ReconcileFunc,
@@ -101,7 +100,6 @@ type managedObject struct {
 	deletionPolicy DeletionPolicy
 }
 
-// GetStatus implements ManagedObject.
 func (m *managedObject) GetStatus(rl v1alpha1.ResourceLocation) Status {
 	if m.statusFunc != nil {
 		return m.statusFunc(m.object, rl)
@@ -113,17 +111,14 @@ func (m *managedObject) GetStatus(rl v1alpha1.ResourceLocation) Status {
 	}
 }
 
-// GetDeletionPolicy implements ManagedObject.
 func (m *managedObject) GetDeletionPolicy() DeletionPolicy {
 	return m.deletionPolicy
 }
 
-// GetDependencies implements ManagedObject.
 func (m *managedObject) GetDependencies() []ManagedObject {
 	return m.dependencies
 }
 
-// Reconcile implements ManagedObject.
 func (m *managedObject) Reconcile(ctx context.Context) error {
 	if m.reconcileFunc != nil {
 		return m.reconcileFunc(ctx, m.object)
@@ -131,7 +126,6 @@ func (m *managedObject) Reconcile(ctx context.Context) error {
 	return nil
 }
 
-// GetObject implements ManagedObject.
 func (m *managedObject) GetObject() client.Object {
 	return m.object
 }

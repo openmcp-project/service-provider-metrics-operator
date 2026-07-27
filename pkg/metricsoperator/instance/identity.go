@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	labelInstanceID          = "velero.services.openmcp.cloud/instance-id"
+	labelInstanceID          = "metrics-operator.services.openmcp.cloud/instance-id"
 	base32EncodeStdLowerCase = "abcdefghijklmnopqrstuvwxyz234567"
 )
 

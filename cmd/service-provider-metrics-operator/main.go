@@ -24,7 +24,7 @@ import (
 	"strings"
 	"time"
 
-	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	v2 "github.com/fluxcd/helm-controller/api/v2"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	flag "github.com/spf13/pflag"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -36,7 +36,6 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -85,7 +84,7 @@ func initPlatformScheme() {
 	utilruntime.Must(clustersv1alpha1.AddToScheme(platformScheme))
 	utilruntime.Must(providerv1alpha1.AddToScheme(platformScheme))
 	utilruntime.Must(sourcev1.AddToScheme(platformScheme))
-	utilruntime.Must(helmv2.AddToScheme(platformScheme))
+	utilruntime.Must(v2.AddToScheme(platformScheme))
 }
 
 func initOnboardingScheme() {
@@ -119,7 +118,7 @@ func main() {
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&environment, "environment", "", "Name of the environment")
-	flag.StringVar(&providerName, "provider-name", "", "Name of the provider resource")
+	flag.StringVar(&providerName, "provider-name", "metrics-operator", "Name of the provider resource")
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -234,7 +233,7 @@ func main() {
 	}
 
 	clusterAccessManager := clusteraccess.NewClusterAccessManager(platformCluster.Client(),
-		metricsoperatorsv1alpha1.GroupVersion.Group, os.Getenv("POD_NAMESPACE"))
+		metricsoperatorsv1alpha1.GroupVersion.Group, podNamespace)
 	clusterAccessManager.WithLogger(&log).
 		WithInterval(10 * time.Second).
 		WithTimeout(30 * time.Minute)
@@ -309,15 +308,10 @@ func main() {
 		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
 		// speeds up voluntary leader transitions as the new leader don't have to wait
 		// LeaseDuration time first.
-		//
-		// In the default scaffold provided, the program ends immediately after
-		// the manager stops, so would be fine to enable this option. However,
-		// if you are doing or is intended to do any operation such as perform cleanups
-		// after the manager stops then its usage might be unsafe.
-		// LeaderElectionReleaseOnCancel: true,
+		LeaderElectionReleaseOnCancel: true,
 	})
 	if err != nil {
-		setupLog.Error(err, "unable to start manager")
+		setupLog.Error(err, "unable to create manager")
 		os.Exit(1)
 	}
 	if err = mgr.Add(platformCluster.Cluster()); err != nil {
@@ -325,12 +319,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	providerConfigUpdates := make(chan event.GenericEvent)
-
 	// TODO: define minimum set of permission the service provider requires on the mcp cluster
 	mcpTokenAccessConfig := &clustersv1alpha1.TokenConfig{
 		Permissions: []clustersv1alpha1.PermissionsRequest{
 			{
+				// Create NS -> pkg/metricsoperator/authn/serviceaccount.go:299
 				Rules: []rbacv1.PolicyRule{
 					{
 						APIGroups: []string{"*"},
@@ -347,7 +340,7 @@ func main() {
 			},
 		},
 	}
-	mcpClusterRequest := advanced.ExistingClusterRequest("mcp", "mcp", func(req reconcile.Request, _ ...any) (*common.ObjectReference, error) {
+	mcpClusterRequest := advanced.ExistingClusterRequest(clustersv1alpha1.PURPOSE_MCP, "mcp", func(req reconcile.Request, _ ...any) (*common.ObjectReference, error) {
 		namespace, err := utils.StableMCPNamespace(req.Name, req.Namespace)
 		if err != nil {
 			return nil, err
@@ -382,7 +375,7 @@ func main() {
 			},
 		},
 	}
-	workloadClusterRequest := advanced.NewClusterRequest("workload", "wl", advanced.StaticClusterRequestSpecGenerator(&clustersv1alpha1.ClusterRequestSpec{
+	workloadClusterRequest := advanced.NewClusterRequest(clustersv1alpha1.PURPOSE_WORKLOAD, "wl", advanced.StaticClusterRequestSpecGenerator(&clustersv1alpha1.ClusterRequestSpec{
 		Purpose: clustersv1alpha1.PURPOSE_WORKLOAD,
 	})).
 		WithNamespaceGenerator(advanced.DefaultNamespaceGeneratorForMCP).
@@ -392,7 +385,7 @@ func main() {
 
 	clusterAccessReconciler := advanced.NewClusterAccessReconciler(platformCluster.Client(), providerName)
 	if debugEnabled() {
-		clusterAccessReconciler = localaccess.NewLocalAdvancedClusterAccessReconciler(clusterAccessReconciler)
+		clusterAccessReconciler = localaccess.NewLocalAdvancedClusterAccessReconciler(clusterAccessReconciler).WithWorkloadCluster()
 	}
 
 	clusterAccessReconciler.
@@ -409,6 +402,7 @@ func main() {
 
 	spr := serviceprovider.NewAPIReconcilerBuilder[*metricsoperatorsv1alpha1.MetricsOperator, *metricsoperatorsv1alpha1.ProviderConfig]().
 		EmptyObjectProvider(func() *metricsoperatorsv1alpha1.MetricsOperator { return &metricsoperatorsv1alpha1.MetricsOperator{} }).
+		EmptyConfigProvider(func() *metricsoperatorsv1alpha1.ProviderConfig { return &metricsoperatorsv1alpha1.ProviderConfig{} }).
 		PlatformCluster(platformCluster).
 		OnboardingCluster(onboardingCluster).
 		SecretNamespace(podNamespace).
@@ -420,18 +414,9 @@ func main() {
 		AdvancedClusterAccessReconciler(clusterAccessReconciler).
 		WorkloadCluster(true).
 		MustBuild()
-	if err := spr.SetupWithManager(mgr, "metricsoperator", providerConfigUpdates); err != nil {
+
+	if err := spr.SetupWithManager(mgr, "metricsoperator"); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MetricsOperator")
-		os.Exit(1)
-	}
-	pcr := serviceprovider.NewConfigReconcilerBuilder[*metricsoperatorsv1alpha1.ProviderConfig]().
-		EmptyObjectProvider(func() *metricsoperatorsv1alpha1.ProviderConfig { return &metricsoperatorsv1alpha1.ProviderConfig{} }).
-		ProviderName(providerName).
-		PlatformCluster(platformCluster).
-		UpdateChannel(providerConfigUpdates).
-		MustBuild()
-	if err := pcr.SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ProviderConfig")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
@@ -450,6 +435,9 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+
+	// DONT put anything below this line!
+	// IF you do, disable LeaderElectionReleaseOnCancel above
 }
 
 // initializePlatformCluster initializes the platform cluster with the necessary REST config and client.

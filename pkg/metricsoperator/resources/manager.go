@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/meta"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/objectutils"
@@ -36,8 +35,6 @@ type Manager interface {
 
 // OrphanCleaner removes any previously managed objects that are no longer part of the desired state.
 type OrphanCleaner interface {
-	// []Result contains cleanup errors that can be mapped to a managed object.
-	// error represents cleanup errors that cannot be mapped to a managed object.
 	Cleanup(ctx context.Context) ([]Result, error)
 }
 
@@ -49,106 +46,69 @@ func NewManager() Manager {
 	}
 }
 
-// managerImpl manages clusters and invokes reconciliation of ManagedObjects.
 type managerImpl struct {
 	clusters []ManagedCluster
 	cleaners []OrphanCleaner
 }
 
-// AddCluster adds a cluster to a Manager.
 func (m *managerImpl) AddCluster(mc ManagedCluster) {
 	m.clusters = append(m.clusters, mc)
 }
 
-// Apply invokes reconciliation of all ManagedObjects.
-func (m *managerImpl) Apply(ctx context.Context) ([]Result, error) {
-	return m.reconcileObjects(ctx, false)
-}
-
-// Delete invokes deletion of all ManagedObjects.
-func (m *managerImpl) Delete(ctx context.Context) ([]Result, error) {
-	return m.reconcileObjects(ctx, true)
-}
-
-// AddCleaner adds a cleaner to a Manager.
 func (m *managerImpl) AddCleaner(cleaner OrphanCleaner) {
 	m.cleaners = append(m.cleaners, cleaner)
 }
 
-func (m *managerImpl) reconcileObjects(ctx context.Context, isDeletion bool) ([]Result, error) {
-	dependents := m.getDependents()
+func (m *managerImpl) Apply(ctx context.Context) ([]Result, error) {
+	return m.reconcileObjects(ctx, false)
+}
 
-	// Apply or delete objects from each cluster.
+func (m *managerImpl) Delete(ctx context.Context) ([]Result, error) {
+	return m.reconcileObjects(ctx, true)
+}
+
+func (m *managerImpl) reconcileObjects(ctx context.Context, isDeletion bool) ([]Result, error) {
+	deps := m.getDependents()
 	results := []Result{}
 	for _, mc := range m.clusters {
 		for _, mo := range mc.GetObjects() {
-			result := m.reconcileObject(ctx, mc, mo, dependents, isDeletion)
+			result := m.reconcileObject(ctx, mc, mo, deps, isDeletion)
 			results = append(results, result)
 		}
 	}
-
-	// remove any redundant resources like secret copies that are no longer part of the desired state.
 	for _, c := range m.cleaners {
 		result, err := c.Cleanup(ctx)
 		if err != nil {
 			return results, err
 		}
-		results = slices.Concat(results, result)
+		results = append(results, result...)
 	}
-
 	return results, nil
 }
 
-func (m *managerImpl) reconcileObject(ctx context.Context, mc ManagedCluster, mo ManagedObject, dependents dependents, isDeletion bool) Result {
-	client := mc.GetClient()
+func (m *managerImpl) reconcileObject(ctx context.Context, mc ManagedCluster, mo ManagedObject, deps dependents, isDeletion bool) Result {
+	cl := mc.GetClient()
 	obj := mo.GetObject()
 
 	if isDeletion {
-		if err := m.checkForDependents(ctx, dependents[mo]); err != nil {
-			return Result{
-				Object:          mo,
-				Cluster:         mc,
-				OperationResult: controllerutil.OperationResultNone,
-				Error:           err,
-			}
+		if err := m.checkForDependents(ctx, deps[mo]); err != nil {
+			return Result{Object: mo, Cluster: mc, OperationResult: controllerutil.OperationResultNone, Error: err}
 		}
-
 		if mo.GetDeletionPolicy() == Orphan {
-			return Result{
-				Object:          mo,
-				Cluster:         mc,
-				OperationResult: OperationResultOrphaned,
-				Error:           nil,
-			}
+			return Result{Object: mo, Cluster: mc, OperationResult: OperationResultOrphaned, Error: nil}
 		}
-
-		err := client.Delete(ctx, obj)
+		err := cl.Delete(ctx, obj)
 		if apierrors.IsNotFound(err) {
-			return Result{
-				Object:          mo,
-				Cluster:         mc,
-				OperationResult: OperationResultDeleted,
-				Error:           nil,
-			}
+			return Result{Object: mo, Cluster: mc, OperationResult: OperationResultDeleted, Error: nil}
 		}
-		return Result{
-			Object:          mo,
-			Cluster:         mc,
-			OperationResult: OperationResultDeletionRequested,
-			Error:           err,
-		}
+		return Result{Object: mo, Cluster: mc, OperationResult: OperationResultDeletionRequested, Error: err}
 	}
 
-	opResult, err := controllerutil.CreateOrUpdate(ctx, client, obj, func() error {
+	opResult, err := controllerutil.CreateOrUpdate(ctx, cl, obj, func() error {
 		meta.SetManagedBy(obj)
 		return mo.Reconcile(ctx)
 	})
-	return Result{
-		Object:          mo,
-		Cluster:         mc,
-		OperationResult: opResult,
-		Error:           err,
-	}
+	return Result{Object: mo, Cluster: mc, OperationResult: opResult, Error: err}
 }
 
 func (m *managerImpl) checkForDependents(ctx context.Context, deps []dependency) error {
@@ -157,16 +117,12 @@ func (m *managerImpl) checkForDependents(ctx context.Context, deps []dependency)
 		obj := dep.Object.GetObject()
 		err := dep.Cluster.GetClient().Get(ctx, client.ObjectKeyFromObject(obj), obj)
 		if apierrors.IsNotFound(err) {
-			// "Not found" is the success case: The object which depends on us does not exist anymore.
 			continue
 		}
 		if err != nil {
-			// Some unexpected error occurred.
 			errs = append(errs, err)
 			continue
 		}
-		// No error occurred, the GET request has been successful.
-		// The object still exists and depends on us.
 		errs = append(errs, fmt.Errorf("dependent object still exists: %s", objectutils.ObjectID(obj)))
 	}
 	return errors.Join(errs...)
@@ -180,10 +136,7 @@ func (m *managerImpl) getDependents() dependents {
 				if deps[dep] == nil {
 					deps[dep] = []dependency{}
 				}
-				deps[dep] = append(deps[dep], dependency{
-					Object:  mo,
-					Cluster: mc,
-				})
+				deps[dep] = append(deps[dep], dependency{Object: mo, Cluster: mc})
 			}
 		}
 	}

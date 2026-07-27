@@ -1,0 +1,6 @@
+apiVersion: core.open-control-plane.io/v2alpha1
+kind: ControlPlane
+metadata:
+  name: test-mcp
+spec: 
+  iam: {}
