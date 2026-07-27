@@ -19,25 +19,52 @@ package v1alpha1
 import (
 	"time"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
 // ProviderConfigSpec defines the desired state of ProviderConfig
 type ProviderConfigSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
+	// Versions specify the valid inputs for the Flux.Spec.Version field.
+	// +required
+	// +kubebuilder:validation:MinItems=1
+	// +listType=map
+	// +listMapKey=version
+	Versions []MetricsOperatorVersion `json:"versions"`
 
 	// foo is an example field of ProviderConfig. Edit providerconfig_types.go to remove/update
 	// +optional
 	// +kubebuilder:default:="1m"
 	// +kubebuilder:validation:Format=duration
 	PollInterval *metav1.Duration `json:"pollInterval,omitempty"`
+}
+
+// MetricsOperatorVersion defines a version of Metrics Operator that can be installed
+type MetricsOperatorVersion struct {
+	// Version is the Metrics Operator version to install.
+	// This version is compared with MetricsOperator.Spec.Version to define available versions
+	// and the deployment artifacts of a version.
+	// +required
+	Version string `json:"version"`
+
+	// ChartVersion is the version of the Helm chart to install
+	// +required
+	ChartVersion string `json:"chartVersion"`
+
+	// ChartURL is a reference to an OCI artifact repository that hosts the metrics-operator Helm chart.
+	// +optional
+	// +kubebuilder:default="oci://ghcr.io/openmcp-project/charts/metrics-operator"
+	ChartURL *string `json:"chartURL,omitempty"`
+
+	// ChartPullSecret is a reference to the secret containing the credentials to pull the Helm chart.
+	// The secret must be of type kubernetes.io/dockerconfigjson.
+	// +optional
+	ChartPullSecret string `json:"chartPullSecret,omitempty"`
+
+	// HelmValues are arbitrary Helm values passed directly to the managed HelmRelease.
+	// +optional
+	HelmValues *apiextensionsv1.JSON `json:"helmValues,omitempty"`
 }
 
 // ProviderConfigStatus defines the observed state of ProviderConfig.
