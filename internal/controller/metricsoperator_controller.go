@@ -24,9 +24,8 @@ import (
 	"strings"
 	"time"
 
-	libutils "github.com/openmcp-project/openmcp-operator/lib/utils"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -34,12 +33,13 @@ import (
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
 	ctrlerrors "github.com/openmcp-project/controller-utils/pkg/errors"
 	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider"
-	clusteraccess "github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider/clusteraccess"
+	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider/clusteraccess"
+	libutils "github.com/openmcp-project/openmcp-operator/lib/utils"
 
 	apiv1alpha1 "github.com/openmcp-project/service-provider-metrics-operator/api/v1alpha1"
-	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/authn"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/authz"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/flux"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/helm"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/instance"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/objectutils"
@@ -48,7 +48,7 @@ import (
 
 const conditionReasonError = "ReconcileError"
 
-// ErrManagedResources is an end-user facing error if errors are present inside ExternalSecretsOperator.Status.ManagedResources
+// ErrManagedResources is an end-user facing error if errors are present in Status.Resources.
 var ErrManagedResources = errors.New("resources contain reconcile errors")
 
 // MetricsOperatorReconciler reconciles a MetricsOperator object
@@ -98,9 +98,7 @@ func (r *MetricsOperatorReconciler) Delete(ctx context.Context, obj *apiv1alpha1
 	if resultContainsErrors || err != nil {
 		return ctrl.Result{}, updateStatusError(obj, resultContainsErrors, err)
 	}
-	return ctrl.Result{
-		RequeueAfter: time.Second * 5,
-	}, nil
+	return ctrl.Result{RequeueAfter: time.Second * 5}, nil
 }
 
 func updateStatusError(obj *apiv1alpha1.MetricsOperator, resourceErrors bool, err error) error {
@@ -121,61 +119,69 @@ func userErrorMessage(err error) string {
 	if errors.Is(err, ErrManagedResources) {
 		errorMessages = append(errorMessages, ErrManagedResources.Error())
 	}
-	if errors.Is(err, metricsoperator.ErrOrphanCleanup) {
-		errorMessages = append(errorMessages, metricsoperator.ErrOrphanCleanup.Error())
-	}
 	return strings.Join(errorMessages, "; ")
 }
 
 func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj *apiv1alpha1.MetricsOperator, pc *apiv1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (resources.Manager, error) {
 	tenantNamespace, err := libutils.StableMCPNamespace(obj.Name, obj.Namespace)
 	if err != nil {
-		return nil, fmt.Errorf("failed to determine tenant namespace for external secrets deployment: %w", err)
+		return nil, fmt.Errorf("failed to determine tenant namespace: %w", err)
 	}
-	err = r.ensureInstanceID(ctx, obj)
-	if err != nil {
+
+	if err := r.ensureInstanceID(ctx, obj); err != nil {
 		return nil, err
 	}
+
 	// select the requested version from the provider config
 	moVersion, err := selectMetricsOperatorVersion(obj.Spec.Version, pc)
 	if err != nil {
 		return nil, err
 	}
+	helmValues, err := helm.ExtractHelmValues(moVersion.HelmValues)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract helm values: %w", err)
+	}
 
 	platformCluster := resources.NewManagedCluster(r.PlatformCluster, r.PlatformCluster.RESTConfig(), tenantNamespace, resources.PlatformCluster)
 	workloadCluster := resources.NewManagedCluster(clusters.WorkloadCluster, clusters.WorkloadCluster.RESTConfig(), instance.Namespace(obj), resources.WorkloadCluster)
-	mcpCluster := resources.NewManagedCluster(clusters.MCPCluster, clusters.MCPCluster.RESTConfig(), metricsoperator.DefaultNamespace, resources.ManagedControlPlane)
+	mcpCluster := resources.NewManagedCluster(clusters.MCPCluster, clusters.MCPCluster.RESTConfig(), flux.DefaultNamespace, resources.ManagedControlPlane)
+
+	metricsNamespace := mcpCluster.GetDefaultNamespace()
+	if helmValues.NamespaceOverride != "" {
+		metricsNamespace = helmValues.NamespaceOverride
+	}
 
 	// ### MCP RESOURCES ###
-	// set namespace deletion policy orphan to prevent deleting end user data that we are not aware of
-	mcpServiceAccount := authn.ManagedServiceAccount{
-		NamespacedName: types.NamespacedName{
+	// ServiceAccount on MCP + token Secret on workload cluster so --install-crds connects to MCP.
+	mcpServiceAccount := &authn.ManagedServiceAccount{
+		NamespacedName: k8stypes.NamespacedName{
 			Name:      "metrics-operator-server",
-			Namespace: mcpCluster.GetDefaultNamespace(),
+			Namespace: metricsNamespace,
 		},
 	}
 
-	mcpServiceAccount.Configure(workloadCluster, mcpCluster, moVersion.HelmValues, pc.PollInterval())
+	mcpServiceAccount.Configure(workloadCluster, mcpCluster, pc.PollInterval())
+
 	moVersion.HelmValues, err = helm.AddAuthToHelmValues(moVersion.HelmValues, mcpCluster, mcpServiceAccount.KubeAPIAccess())
 	if err != nil {
-		return nil, fmt.Errorf("failed to add auth to helm values: %w", err)
+		return nil, fmt.Errorf("failed to inject MCP auth into helm values: %w", err)
 	}
-	moVersion.HelmValues, err = helm.AddDefaultHelmValues(moVersion.HelmValues, mcpCluster.GetDefaultNamespace())
+	moVersion.HelmValues, err = helm.AddDefaultHelmValues(moVersion.HelmValues, metricsNamespace)
 	if err != nil {
-		return nil, fmt.Errorf("failed to add auth to helm values: %w", err)
+		return nil, fmt.Errorf("failed to set default helm values: %w", err)
 	}
+	authz.Configure(mcpCluster, mcpServiceAccount)
 
-	authz.Configure(mcpCluster, &mcpServiceAccount)
-
-	metricsoperator.ManageFluxResources(metricsoperator.ManageFluxResourcesParams{
+	flux.ManageFluxResources(flux.ManageFluxResourcesParams{
 		Cluster:           platformCluster,
-		MCPNamespace:      metricsoperator.DefaultNamespace,
+		MCPNamespace:      metricsNamespace,
 		WorkloadNamespace: instance.Namespace(obj),
 		Obj:               obj,
 		Interval:          pc.PollInterval(),
 		ClusterContext:    clusters,
 		RequestedVersion:  moVersion,
 	})
+
 	mgr := resources.NewManager()
 	mgr.AddCluster(mcpCluster)
 	mgr.AddCluster(workloadCluster)
@@ -185,9 +191,9 @@ func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj
 }
 
 func selectMetricsOperatorVersion(requestedVersion string, pc *apiv1alpha1.ProviderConfig) (apiv1alpha1.MetricsOperatorVersion, error) {
-	for _, configVersion := range pc.Spec.Versions {
-		if configVersion.Version == requestedVersion {
-			return configVersion, nil
+	for _, v := range pc.Spec.Versions {
+		if v.Version == requestedVersion {
+			return v, nil
 		}
 	}
 	return apiv1alpha1.MetricsOperatorVersion{}, fmt.Errorf("%w: requested version (%s) is not available", ctrlerrors.ErrInvalidUserInput, requestedVersion)
@@ -212,7 +218,7 @@ func resultsToResources(ctx context.Context, results []resources.Result) ([]apiv
 		})
 		if res.Error != nil {
 			containsError = true
-			l.Error(res.Error, "objectID", objectutils.ObjectID(obj))
+			l.Error(res.Error, "resource reconcile failed", "object", objectutils.ObjectID(obj))
 		}
 	}
 	return resources, containsError
@@ -234,24 +240,6 @@ func allResourcesReady(resources []apiv1alpha1.ManagedResource) bool {
 	return true
 }
 
-// IsReferencedSecret returns true if the given secret should trigger
-// reconciliation. See serviceprovider.SecretWatcher for details.
-//
-//revive:disable:unused-parameter
-func (r *MetricsOperatorReconciler) IsReferencedSecret(ctx context.Context, secret *corev1.Secret, pc *apiv1alpha1.ProviderConfig) bool {
-	if pc == nil {
-		return false
-	}
-	// TODO: Check if the secret is referenced in the provider config, for example:
-	// for _, ref := range pc.Spec.ImagePullSecrets {
-	//     if ref.Name == secret.Name {
-	//         return true
-	//     }
-	// }
-	return false
-}
-
-// sets an instance id that is used to label every managed resource and create an instance namespace on the workload cluster
 func (r *MetricsOperatorReconciler) ensureInstanceID(ctx context.Context, obj *apiv1alpha1.MetricsOperator) error {
 	if len(instance.GetID(obj)) == 0 {
 		instance.SetID(obj, instance.GenerateID(obj))

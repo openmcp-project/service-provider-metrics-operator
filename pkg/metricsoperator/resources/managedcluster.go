@@ -53,17 +53,14 @@ type managedCluster struct {
 	clusterType      ClusterType
 }
 
-// GetClient implements ManagedCluster.
 func (m *managedCluster) GetClient() client.Client {
 	return m.cluster.Client()
 }
 
-// GetConfig implements ManagedCluster.
 func (m *managedCluster) GetConfig() *rest.Config {
 	return m.cfg
 }
 
-// GetHostAndPort implements ManagedCluster.
 func (m *managedCluster) GetHostAndPort() (string, string) {
 	input := strings.TrimPrefix(m.cfg.Host, "https://")
 	host, port, found := strings.Cut(input, ":")
@@ -73,27 +70,22 @@ func (m *managedCluster) GetHostAndPort() (string, string) {
 	return host, port
 }
 
-// GetDefaultNamespace implements ManagedCluster.
 func (m *managedCluster) GetDefaultNamespace() string {
 	return m.defaultNamespace
 }
 
-// AddObject implements ManagedCluster.
 func (m *managedCluster) AddObject(o ManagedObject) {
 	m.objects = append(m.objects, o)
 }
 
-// GetObjects implements ManagedCluster.
 func (m *managedCluster) GetObjects() []ManagedObject {
 	return m.objects
 }
 
-// GetCluster implements ManagedCluster.
 func (m *managedCluster) GetCluster() *clusters.Cluster {
 	return m.cluster
 }
 
-// GetClusterType implements ManagedCluster.
 func (m *managedCluster) GetClusterType() ClusterType {
 	return m.clusterType
 }

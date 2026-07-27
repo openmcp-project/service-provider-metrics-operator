@@ -43,16 +43,15 @@ spec:
             properties:
               pollInterval:
                 default: 1m
-                description: foo is an example field of ProviderConfig. Edit providerconfig_types.go
-                  to remove/update
+                description: PollInterval at which the controller requeues to detect
+                  drift
                 format: duration
                 type: string
               versions:
-                description: Versions specify the valid inputs for the Flux.Spec.Version
-                  field.
+                description: Versions specify the valid inputs for MetricsOperator.Spec.Version.
                 items:
-                  description: MetricsOperatorVersion defines a version of Metrics
-                    Operator that can be installed
+                  description: MetricsOperatorVersion defines a version of metrics-operator
+                    that can be installed
                   properties:
                     chartPullSecret:
                       description: |-
@@ -66,17 +65,14 @@ spec:
                       type: string
                     chartVersion:
                       description: ChartVersion is the version of the Helm chart to
-                        install
+                        install.
                       type: string
                     helmValues:
                       description: HelmValues are arbitrary Helm values passed directly
                         to the managed HelmRelease.
                       x-kubernetes-preserve-unknown-fields: true
                     version:
-                      description: |-
-                        Version is the Metrics Operator version to install.
-                        This version is compared with MetricsOperator.Spec.Version to define available versions
-                        and the deployment artifacts of a version.
+                      description: Version is the metrics-operator version to install.
                       type: string
                   required:
                   - chartVersion

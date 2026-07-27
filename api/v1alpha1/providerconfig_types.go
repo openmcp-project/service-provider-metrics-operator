@@ -26,29 +26,27 @@ import (
 
 // ProviderConfigSpec defines the desired state of ProviderConfig
 type ProviderConfigSpec struct {
-	// Versions specify the valid inputs for the Flux.Spec.Version field.
+	// Versions specify the valid inputs for MetricsOperator.Spec.Version.
 	// +required
 	// +kubebuilder:validation:MinItems=1
 	// +listType=map
 	// +listMapKey=version
 	Versions []MetricsOperatorVersion `json:"versions"`
 
-	// foo is an example field of ProviderConfig. Edit providerconfig_types.go to remove/update
+	// PollInterval at which the controller requeues to detect drift
 	// +optional
 	// +kubebuilder:default:="1m"
 	// +kubebuilder:validation:Format=duration
 	PollInterval *metav1.Duration `json:"pollInterval,omitempty"`
 }
 
-// MetricsOperatorVersion defines a version of Metrics Operator that can be installed
+// MetricsOperatorVersion defines a version of metrics-operator that can be installed
 type MetricsOperatorVersion struct {
-	// Version is the Metrics Operator version to install.
-	// This version is compared with MetricsOperator.Spec.Version to define available versions
-	// and the deployment artifacts of a version.
+	// Version is the metrics-operator version to install.
 	// +required
 	Version string `json:"version"`
 
-	// ChartVersion is the version of the Helm chart to install
+	// ChartVersion is the version of the Helm chart to install.
 	// +required
 	ChartVersion string `json:"chartVersion"`
 
@@ -129,6 +127,8 @@ func init() {
 
 // PollInterval returns the poll interval duration from the spec.
 func (o *ProviderConfig) PollInterval() time.Duration {
-	// TODO pollInterval has to be required
+	if o.Spec.PollInterval == nil {
+		return time.Minute
+	}
 	return o.Spec.PollInterval.Duration
 }

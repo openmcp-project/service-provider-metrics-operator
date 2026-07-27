@@ -12,19 +12,19 @@ import (
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/resources"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 )
 
 const (
 	serviceAccountMountPath = "/var/run/secrets/kubernetes.io/serviceaccount"
 	serviceAccountVolume    = "kube-api-access"
 
-	annotationTokenExpirationTime = "velero.services.openmcp.cloud/token-expiration-time"
+	annotationTokenExpirationTime = "metrics-operator.services.openmcp.cloud/token-expiration-time"
 )
 
 var (
@@ -39,10 +39,8 @@ type serviceAccountToken struct {
 	TokenExpiry time.Time
 }
 
-// TokenApplyFunc injects the token to any container of the given PodSpec.
-type TokenApplyFunc func(ps *corev1.PodSpec)
-
-// generateToken generates a token for the given ServiceAccount. If successful, it returns the token and the actual lifetime of it, which might deviate from the desired lifetime.
+// generateToken generates a token for the given ServiceAccount. If successful, it returns the token and
+// the actual lifetime of it, which might deviate from the desired lifetime.
 func generateToken(ctx context.Context, mcp *clusters.Cluster, cfg *rest.Config, svcAccRef types.NamespacedName, expiration time.Duration) (*serviceAccountToken, error) {
 	if svcAccRef.Name == "" || svcAccRef.Namespace == "" {
 		return nil, errSANameOrNamespaceEmpty
@@ -61,7 +59,7 @@ func generateToken(ctx context.Context, mcp *clusters.Cluster, cfg *rest.Config,
 
 	req := &authenticationv1.TokenRequest{
 		Spec: authenticationv1.TokenRequestSpec{
-			ExpirationSeconds: ptr.To(int64(expiration.Seconds())),
+			ExpirationSeconds: new(int64(expiration.Seconds())),
 		},
 	}
 	if err := mcp.Client().SubResource("token").Create(ctx, sa, req); err != nil {
@@ -287,20 +285,19 @@ func unmarshalIfPresent(obj map[string]json.RawMessage, key string, out any) err
 }
 
 // Configure adds a managed ServiceAccount object to the given MCP cluster and a managed Secret object to the given workload cluster.
-func (m *ManagedServiceAccount) Configure(workloadCluster, mcpCluster resources.ManagedCluster, values *apiextensionsv1.JSON, pollInterval time.Duration) {
-	// Add namespace on the remote cluster.
-	ns := &corev1.Namespace{
+func (m *ManagedServiceAccount) Configure(workloadCluster, mcpCluster resources.ManagedCluster, pollInterval time.Duration) {
+	// Add a namespace on the MCP cluster so the service account has a place to live.
+	ns := resources.NewManagedObject(&corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: m.Namespace,
 		},
-	}
-	nsa := resources.NewManagedObject(ns, resources.ManagedObjectContext{
+	}, resources.ManagedObjectContext{
 		ReconcileFunc: resources.NoOp,
 		StatusFunc:    resources.SimpleStatus,
 	})
-	mcpCluster.AddObject(nsa)
+	mcpCluster.AddObject(ns)
 
-	// Add a service account on the remote cluster.
+	// Add a service account on the MCP cluster.
 	sa := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      m.Name,
@@ -308,6 +305,7 @@ func (m *ManagedServiceAccount) Configure(workloadCluster, mcpCluster resources.
 		},
 	}
 	msa := resources.NewManagedObject(sa, resources.ManagedObjectContext{
+		DependsOn:     []resources.ManagedObject{ns},
 		ReconcileFunc: resources.NoOp,
 		StatusFunc:    resources.SimpleStatus,
 	})
@@ -363,57 +361,6 @@ func (m *ManagedServiceAccount) Configure(workloadCluster, mcpCluster resources.
 		StatusFunc: resources.SimpleStatus,
 	})
 	workloadCluster.AddObject(secret)
-}
-
-func addOrReplaceVolume(ps *corev1.PodSpec, vol corev1.Volume) {
-	for i := range ps.Volumes {
-		if ps.Volumes[i].Name == vol.Name {
-			ps.Volumes[i] = vol
-			return
-		}
-	}
-
-	ps.Volumes = append(ps.Volumes, vol)
-}
-
-func addOrReplaceEnv(c *corev1.Container, env corev1.EnvVar) {
-	for i := range c.Env {
-		if c.Env[i].Name == env.Name {
-			c.Env[i] = env
-			return
-		}
-	}
-
-	c.Env = append(c.Env, env)
-}
-
-func addOrReplaceVolumeMount(c *corev1.Container, vm corev1.VolumeMount) {
-	for i := range c.VolumeMounts {
-		if c.VolumeMounts[i].Name == vm.Name {
-			c.VolumeMounts[i] = vm
-			return
-		}
-	}
-
-	c.VolumeMounts = append(c.VolumeMounts, vm)
-}
-
-func applyToContainer(c *corev1.Container, remoteCluster resources.ManagedCluster) {
-	remoteHost, remotePort := remoteCluster.GetHostAndPort()
-
-	addOrReplaceVolumeMount(c, corev1.VolumeMount{
-		Name:      serviceAccountVolume,
-		MountPath: serviceAccountMountPath,
-		ReadOnly:  true,
-	})
-	addOrReplaceEnv(c, corev1.EnvVar{
-		Name:  "KUBERNETES_SERVICE_HOST",
-		Value: remoteHost,
-	})
-	addOrReplaceEnv(c, corev1.EnvVar{
-		Name:  "KUBERNETES_SERVICE_PORT",
-		Value: remotePort,
-	})
 }
 
 func getTokenExpirationTime(obj *corev1.Secret) (time.Time, error) {

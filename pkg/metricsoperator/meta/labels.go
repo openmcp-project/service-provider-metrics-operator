@@ -6,7 +6,7 @@ const (
 	// LabelManagedBy defines the managed-by label that is added to every managed object.
 	LabelManagedBy = "app.kubernetes.io/managed-by"
 	// LabelManagedByValue defines the managed-by value that is added to every managed object.
-	LabelManagedByValue = "service-provider-external-secrets"
+	LabelManagedByValue = "service-provider-metrics-operator"
 )
 
 // SetManagedBy sets the managed-by label of the given client.Object.

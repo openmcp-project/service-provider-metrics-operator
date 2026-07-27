@@ -7,13 +7,17 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/e2e-framework/klient/wait"
 	"sigs.k8s.io/e2e-framework/pkg/env"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 
 	"github.com/openmcp-project/openmcp-testing/pkg/providers"
 	"github.com/openmcp-project/openmcp-testing/pkg/setup"
+	"github.com/openmcp-project/openmcp-testing/pkg/setup/extensions"
+	"github.com/openmcp-project/openmcp-testing/pkg/setup/extensions/fluxcd"
 )
 
 var testenv env.Environment
@@ -23,6 +27,7 @@ func TestMain(m *testing.M) {
 	version := mustVersion()
 	openmcp := setup.OpenMCPSetup{
 		Namespace: "openmcp-system",
+		WaitOpts:  []wait.Option{wait.WithTimeout(5 * time.Minute)},
 		Operator: setup.OpenMCPOperatorSetup{
 			Name: "openmcp-operator",
 			// renovate: datasource=docker depName=ghcr.io/openmcp-project/images/openmcp-operator
@@ -42,11 +47,16 @@ func TestMain(m *testing.M) {
 				Name:               "metricsoperator",
 				Image:              fmt.Sprintf("ghcr.io/openmcp-project/images/service-provider-metrics-operator:%s", version),
 				LoadImageToCluster: true,
+				WaitOpts:           []wait.Option{wait.WithTimeout(5 * time.Minute)},
 			},
+		},
+		Extensions: []extensions.Extension{
+			&fluxcd.FluxCD{},
 		},
 	}
 	testenv = env.NewWithConfig(envconf.New().WithNamespace(openmcp.Namespace))
 	openmcp.Bootstrap(testenv)
+
 	os.Exit(testenv.Run(m))
 }
 

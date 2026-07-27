@@ -10,7 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const clusterRoleBindingName = "velero-server"
+const clusterRoleBindingName = "metrics-operator-server"
 
 // Configure adds a managed ClusterRoleBinding object to the given cluster.
 // The passed in service account is granted the cluster-admin role.
@@ -29,6 +29,7 @@ func Configure(cluster resources.ManagedCluster, msa *authn.ManagedServiceAccoun
 					Namespace: msa.Namespace,
 				},
 			}
+			// TODO: define minimum set of permissions the service provider requires on the MCP cluster
 			oCRB.RoleRef = rbacv1.RoleRef{
 				APIGroup: rbacv1.GroupName,
 				Kind:     "ClusterRole",
