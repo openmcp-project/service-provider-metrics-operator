@@ -46,10 +46,6 @@ func AddDefaultHelmValues(values *apiextensionsv1.JSON, mcpNamespace string) (*a
 		return nil, err
 	}
 
-	if root["configNamespace"], err = json.Marshal(mcpNamespace); err != nil {
-		return nil, err
-	}
-
 	root["manager"], err = patchEnvVars(root["manager"], corev1.EnvVar{Name: "OPERATOR_CONFIG_NAMESPACE", Value: mcpNamespace})
 	if err != nil {
 		return nil, fmt.Errorf("manager: %w", err)
@@ -57,13 +53,6 @@ func AddDefaultHelmValues(values *apiextensionsv1.JSON, mcpNamespace string) (*a
 	if root["serviceAccount"], err = json.Marshal(map[string]any{
 		"create":    false,
 		"automount": false,
-	}); err != nil {
-		return nil, err
-	}
-	if root["webhooks"], err = json.Marshal(map[string]any{
-		"manage":  false,
-		"service": map[string]any{"enabled": false},
-		"listen":  false,
 	}); err != nil {
 		return nil, err
 	}
