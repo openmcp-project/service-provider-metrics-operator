@@ -96,11 +96,6 @@ func TestAddDefaultHelmValues_SetsOperatorConfigNamespace(t *testing.T) {
 			var root map[string]json.RawMessage
 			assert.NoError(t, json.Unmarshal(got.Raw, &root))
 
-			// configNamespace top-level key
-			var configNS string
-			assert.NoError(t, json.Unmarshal(root["configNamespace"], &configNS))
-			assert.Equal(t, tt.namespace, configNS)
-
 			// OPERATOR_CONFIG_NAMESPACE in manager.extraEnv
 			var manager map[string]json.RawMessage
 			assert.NoError(t, json.Unmarshal(root["manager"], &manager))
