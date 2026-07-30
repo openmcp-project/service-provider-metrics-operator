@@ -49,6 +49,11 @@ func AddDefaultHelmValues(values *apiextensionsv1.JSON, mcpNamespace string) (*a
 	if root["configNamespace"], err = json.Marshal(mcpNamespace); err != nil {
 		return nil, err
 	}
+
+	root["manager"], err = patchEnvVars(root["manager"], corev1.EnvVar{Name: "OPERATOR_CONFIG_NAMESPACE", Value: mcpNamespace})
+	if err != nil {
+		return nil, fmt.Errorf("manager: %w", err)
+	}
 	if root["serviceAccount"], err = json.Marshal(map[string]any{
 		"create":    false,
 		"automount": false,
@@ -204,4 +209,25 @@ func upsertEnvVar(list []corev1.EnvVar, e corev1.EnvVar) []corev1.EnvVar {
 		}
 	}
 	return append(out, e)
+}
+
+func patchEnvVars(raw json.RawMessage, envVars ...corev1.EnvVar) (json.RawMessage, error) {
+	section := map[string]json.RawMessage{}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &section); err != nil {
+			return nil, err
+		}
+	}
+	var envs []corev1.EnvVar
+	if err := unmarshalKey(section, "extraEnv", &envs); err != nil {
+		return nil, err
+	}
+	for _, e := range envVars {
+		envs = upsertEnvVar(envs, e)
+	}
+	var err error
+	if section["extraEnv"], err = json.Marshal(envs); err != nil {
+		return nil, err
+	}
+	return json.Marshal(section)
 }
