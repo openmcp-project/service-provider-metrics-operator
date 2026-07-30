@@ -25,6 +25,8 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -42,6 +44,7 @@ import (
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/flux"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/helm"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/instance"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/mcpresources"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/objectutils"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/resources"
 )
@@ -83,7 +86,26 @@ func (r *MetricsOperatorReconciler) CreateOrUpdate(ctx context.Context, obj *api
 
 // Delete is called on every delete event
 func (r *MetricsOperatorReconciler) Delete(ctx context.Context, obj *apiv1alpha1.MetricsOperator, pc *apiv1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (ctrl.Result, error) {
+	blockingKinds, err := mcpresources.BlockingKinds(ctx, clusters.MCPCluster.Client())
+	if err != nil {
+		serviceprovider.StatusProgressing(obj, conditionReasonError, err.Error())
+		return ctrl.Result{}, err
+	}
+	if len(blockingKinds) > 0 {
+		msg := fmt.Sprintf("waiting for user resources to be deleted: %s", strings.Join(blockingKinds, ", "))
+		serviceprovider.StatusTerminating(obj)
+		// Overwrite the condition to carry the blocking-kinds message while keeping Phase=Terminating.
+		apimeta.SetStatusCondition(obj.GetConditions(), metav1.Condition{
+			Type:               "Ready",
+			Status:             metav1.ConditionFalse,
+			ObservedGeneration: obj.GetGeneration(),
+			Reason:             "UserResourcesExist",
+			Message:            msg,
+		})
+		return ctrl.Result{RequeueAfter: time.Second * 5}, nil
+	}
 	serviceprovider.StatusTerminating(obj)
+
 	mgr, err := r.createObjectManager(ctx, obj, pc, clusters)
 	if err != nil {
 		serviceprovider.StatusProgressing(obj, conditionReasonError, err.Error())

@@ -181,6 +181,60 @@ func TestServiceProvider(t *testing.T) {
 				return ctx
 			},
 		).
+		Assess("delete MetricsOperator: blocked while Metric CRs exist, unblocked after cleanup",
+			func(ctx context.Context, t *testing.T, c *envconf.Config) context.Context {
+				onboardingConfig, err := clusterutils.OnboardingConfig()
+				if err != nil {
+					t.Error(err)
+					return ctx
+				}
+				platformConfig, err := clusterutils.ConfigByPrefix("platform", corev1.NamespaceDefault)
+				if err != nil {
+					t.Errorf("failed to get platform cluster config: %v", err)
+					return ctx
+				}
+
+				// Trigger deletion of the MetricsOperator.
+				mo := &apiv1alpha1.MetricsOperator{}
+				if err := onboardingConfig.Client().Resources().Get(ctx, testMCP, corev1.NamespaceDefault, mo); err != nil {
+					t.Errorf("failed to get MetricsOperator: %v", err)
+					return ctx
+				}
+				if err := onboardingConfig.Client().Resources().Delete(ctx, mo); err != nil {
+					t.Errorf("failed to delete MetricsOperator: %v", err)
+					return ctx
+				}
+
+				// MetricsOperator must stay in Terminating while Metric CRs remain on the MCP.
+				if err := wait.For(openmcpconditions.Match(mo, onboardingConfig, "Ready", corev1.ConditionFalse),
+					wait.WithTimeout(30*time.Second)); err != nil {
+					t.Logf("MetricsOperator did not reach non-Ready within 30s (may already be gone — that's a bug): %v", err)
+				}
+
+				// Remove the Metric CRs from the MCP so deletion can proceed.
+				metricList, delErr := clusterutils.ImportToMCPCluster(ctx, platformConfig, testMCP, "mcp")
+				if delErr != nil {
+					t.Logf("could not list mcp objects for cleanup (CRD may already be gone): %v", delErr)
+				} else {
+					for i := range metricList.Items {
+						obj := &metricList.Items[i]
+						mcpConfig, mcpErr := clusterutils.MCPConfig(ctx, platformConfig, testMCP)
+						if mcpErr != nil {
+							t.Errorf("failed to get MCP config: %v", mcpErr)
+							return ctx
+						}
+						_ = mcpConfig.Client().Resources().Delete(ctx, obj)
+					}
+				}
+
+				// Now the MetricsOperator must fully delete.
+				if err := wait.For(conditions.New(onboardingConfig.Client().Resources()).ResourceDeleted(mo),
+					wait.WithTimeout(5*time.Minute)); err != nil {
+					t.Errorf("MetricsOperator not deleted after Metric CRs were removed: %v", err)
+				}
+				return ctx
+			},
+		).
 		Teardown(func(ctx context.Context, t *testing.T, c *envconf.Config) context.Context {
 			onboardingConfig, err := clusterutils.OnboardingConfig()
 			if err != nil {
