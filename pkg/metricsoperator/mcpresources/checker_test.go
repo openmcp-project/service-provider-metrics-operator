@@ -2,44 +2,41 @@ package mcpresources_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/api/meta/testrestmapper"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/mcpresources"
 )
 
-type noMatchMapper struct {
-	apimeta.RESTMapper
-	hiddenKinds map[string]bool
+// HideCrdInterceptor hides listed Kinds from the REST mapper, simulating absent CRDs.
+func HideCrdInterceptor(hiddenCRDs ...string) interceptor.Funcs {
+	return interceptor.Funcs{
+		List: func(ctx context.Context, client client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			gvk := list.GetObjectKind().GroupVersionKind()
+			if slices.Contains(hiddenCRDs, gvk.Kind) {
+				return &meta.NoKindMatchError{GroupKind: gvk.GroupKind()}
+			}
+			return client.List(ctx, list, opts...)
+		},
+	}
 }
 
-func (m *noMatchMapper) RESTMappings(gk schema.GroupKind, versions ...string) ([]*apimeta.RESTMapping, error) {
-	if m.hiddenKinds[gk.Kind] {
-		return nil, &apimeta.NoKindMatchError{GroupKind: gk}
-	}
-	return m.RESTMapper.RESTMappings(gk, versions...)
-}
-
-func newFakeClient(hidden map[string]bool, objs ...client.Object) client.Client {
-	mapper := &noMatchMapper{
-		RESTMapper:  testrestmapper.TestOnlyStaticRESTMapper(scheme.Scheme),
-		hiddenKinds: hidden,
-	}
-	return fake.NewClientBuilder().WithRESTMapper(mapper).WithObjects(objs...).Build()
+func newFakeClient(hidden []string, objs ...client.Object) client.Client {
+	return fake.NewClientBuilder().WithInterceptorFuncs(HideCrdInterceptor(hidden...)).WithObjects(objs...).Build()
 }
 
 func metricObj(ns, name string) client.Object {
 	u := &unstructured.Unstructured{}
-	u.SetGroupVersionKind(schema.GroupVersionKind{Group: "metrics.openmcp.cloud", Version: "v1alpha1", Kind: "Metric"})
+	u.SetGroupVersionKind(schema.GroupVersionKind{Group: mcpresources.MetricsGroup, Version: mcpresources.MetricsVersion, Kind: "Metric"})
 	u.SetNamespace(ns)
 	u.SetName(name)
 	return u
@@ -47,14 +44,14 @@ func metricObj(ns, name string) client.Object {
 
 func managedMetricObj(ns, name string) client.Object {
 	u := &unstructured.Unstructured{}
-	u.SetGroupVersionKind(schema.GroupVersionKind{Group: "metrics.openmcp.cloud", Version: "v1alpha1", Kind: "ManagedMetric"})
+	u.SetGroupVersionKind(schema.GroupVersionKind{Group: mcpresources.MetricsGroup, Version: mcpresources.MetricsVersion, Kind: "ManagedMetric"})
 	u.SetNamespace(ns)
 	u.SetName(name)
 	return u
 }
 
 func TestBlockingKinds_NoCRDsInstalled(t *testing.T) {
-	cl := newFakeClient(map[string]bool{"MetricList": true, "ManagedMetricList": true})
+	cl := newFakeClient([]string{"MetricList", "ManagedMetricList"})
 
 	kinds, err := mcpresources.BlockingKinds(context.Background(), cl)
 	require.NoError(t, err, "NoKindMatchError should be swallowed")
@@ -86,10 +83,7 @@ func TestBlockingKinds_ManagedMetricExists(t *testing.T) {
 }
 
 func TestBlockingKinds_PartialNoMatchStillChecksOther(t *testing.T) {
-	cl := newFakeClient(
-		map[string]bool{"MetricList": true},
-		managedMetricObj("default", "my-managed-metric"),
-	)
+	cl := newFakeClient([]string{"MetricList"}, managedMetricObj("default", "my-managed-metric"))
 
 	kinds, err := mcpresources.BlockingKinds(context.Background(), cl)
 	require.NoError(t, err)

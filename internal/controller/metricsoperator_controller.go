@@ -93,15 +93,17 @@ func (r *MetricsOperatorReconciler) Delete(ctx context.Context, obj *apiv1alpha1
 	}
 	if len(blockingKinds) > 0 {
 		msg := fmt.Sprintf("waiting for user resources to be deleted: %s", strings.Join(blockingKinds, ", "))
-		serviceprovider.StatusTerminating(obj)
-		// Overwrite the condition to carry the blocking-kinds message while keeping Phase=Terminating.
+
 		apimeta.SetStatusCondition(obj.GetConditions(), metav1.Condition{
-			Type:               "Ready",
+			Type:               serviceprovider.ServiceProviderConditionReady,
 			Status:             metav1.ConditionFalse,
 			ObservedGeneration: obj.GetGeneration(),
 			Reason:             "UserResourcesExist",
 			Message:            msg,
 		})
+		obj.SetObservedGeneration(obj.GetGeneration())
+		obj.SetPhase(serviceprovider.StatusPhaseTerminating)
+
 		return ctrl.Result{RequeueAfter: time.Second * 5}, nil
 	}
 	serviceprovider.StatusTerminating(obj)

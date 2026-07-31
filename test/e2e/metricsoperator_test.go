@@ -208,7 +208,7 @@ func TestServiceProvider(t *testing.T) {
 				// MetricsOperator must stay in Terminating while Metric CRs remain on the MCP.
 				if err := wait.For(openmcpconditions.Match(mo, onboardingConfig, "Ready", corev1.ConditionFalse),
 					wait.WithTimeout(30*time.Second)); err != nil {
-					t.Logf("MetricsOperator did not reach non-Ready within 30s (may already be gone — that's a bug): %v", err)
+					t.Errorf("MetricsOperator did not reach non-Ready within 30s (may already be gone — that's a bug): %v", err)
 				}
 
 				// Remove the Metric CRs from the MCP so deletion can proceed.

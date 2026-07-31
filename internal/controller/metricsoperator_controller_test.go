@@ -2,9 +2,12 @@ package controller
 
 import (
 	"context"
-	"strings"
+	"slices"
 	"testing"
 
+	"github.com/openmcp-project/controller-utils/pkg/clusters"
+	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider"
+	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider/clusteraccess"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -15,12 +18,11 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-
-	"github.com/openmcp-project/controller-utils/pkg/clusters"
-	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider/clusteraccess"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	apiv1alpha1 "github.com/openmcp-project/service-provider-metrics-operator/api/v1alpha1"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/instance"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/mcpresources"
 )
 
 // onboardingScheme includes MetricsOperator so the fake onboarding client accepts it.
@@ -30,45 +32,43 @@ func onboardingScheme() *runtime.Scheme {
 	return s
 }
 
-// noMatchMapper hides listed Kinds from the REST mapper, simulating absent CRDs.
-type noMatchMapper struct {
-	meta.RESTMapper
-	hidden map[string]bool
+// HideCrdInterceptor hides listed Kinds from the REST mapper, simulating absent CRDs.
+func HideCrdInterceptor(hiddenCRDs ...string) interceptor.Funcs {
+	return interceptor.Funcs{
+		List: func(ctx context.Context, client client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			gvk := list.GetObjectKind().GroupVersionKind()
+			if slices.Contains(hiddenCRDs, gvk.Kind) {
+				return &meta.NoKindMatchError{GroupKind: gvk.GroupKind()}
+			}
+			return client.List(ctx, list, opts...)
+		},
+	}
 }
 
-func (m *noMatchMapper) RESTMappings(gk schema.GroupKind, versions ...string) ([]*meta.RESTMapping, error) {
-	if m.hidden[gk.Kind] {
-		return nil, &meta.NoKindMatchError{GroupKind: gk}
-	}
-	return m.RESTMapper.RESTMappings(gk, versions...)
-}
-
-func mcpClientWith(objs ...client.Object) *clusters.Cluster {
-	mapper := &noMatchMapper{
-		RESTMapper: testrestmapper.TestOnlyStaticRESTMapper(runtime.NewScheme()),
-		hidden:     map[string]bool{},
-	}
-	cl := fake.NewClientBuilder().WithRESTMapper(mapper).WithObjects(objs...).Build()
+func mcpClientWith(objs ...client.ObjectList) *clusters.Cluster {
+	cl := fake.NewClientBuilder().WithLists(objs...).Build()
 	return clusters.NewTestClusterFromClient("mcp", cl)
 }
 
 func mcpClientNoCRDs() *clusters.Cluster {
-	mapper := &noMatchMapper{
-		RESTMapper: testrestmapper.TestOnlyStaticRESTMapper(runtime.NewScheme()),
-		hidden:     map[string]bool{"MetricList": true, "ManagedMetricList": true},
-	}
-	cl := fake.NewClientBuilder().WithRESTMapper(mapper).Build()
+	cl := fake.NewClientBuilder().WithInterceptorFuncs(HideCrdInterceptor("MetricList", "ManagedMetricList")).Build()
 	return clusters.NewTestClusterFromClient("mcp", cl)
 }
 
-func metricOnMCP(ns, name string) client.Object {
-	u := &unstructured.Unstructured{}
+func onboardingClient(objs ...client.Object) *clusters.Cluster {
+	onboardingRestMapper := testrestmapper.TestOnlyStaticRESTMapper(onboardingScheme())
+	onboardingClient := fake.NewClientBuilder().WithRESTMapper(onboardingRestMapper).WithScheme(onboardingScheme()).WithObjects(objs...).Build()
+	return clusters.NewTestClusterFromClient("onboarding", onboardingClient)
+}
+
+func metricOnMCP(ns, name string) client.ObjectList {
+	u := unstructured.Unstructured{}
 	u.SetGroupVersionKind(schema.GroupVersionKind{
-		Group: "metrics.openmcp.cloud", Version: "v1alpha1", Kind: "Metric",
+		Group: mcpresources.MetricsGroup, Version: mcpresources.MetricsVersion, Kind: "Metric",
 	})
 	u.SetNamespace(ns)
 	u.SetName(name)
-	return u
+	return &unstructured.UnstructuredList{Items: []unstructured.Unstructured{u}}
 }
 
 // moWithInstanceID returns a MetricsOperator with an instance ID pre-set so that
@@ -86,7 +86,7 @@ func TestDelete_BlockedWhileMetricCRsExist(t *testing.T) {
 	obj.Name = "test"
 	obj.Namespace = "default"
 
-	r := &MetricsOperatorReconciler{}
+	r := &MetricsOperatorReconciler{OnboardingCluster: onboardingClient(obj)}
 
 	mcp := mcpClientWith(metricOnMCP("default", "my-metric"))
 	result, err := r.Delete(context.Background(), obj, &apiv1alpha1.ProviderConfig{}, clusteraccess.ClusterContext{
@@ -95,26 +95,18 @@ func TestDelete_BlockedWhileMetricCRsExist(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Greater(t, result.RequeueAfter.Seconds(), float64(0), "must requeue while CRs exist")
+
 	// condition must name the blocking kind
-	found := false
-	for _, c := range obj.Status.Conditions {
-		if strings.Contains(c.Message, "Metric") {
-			found = true
-		}
-	}
-	assert.True(t, found, "condition message must name blocking kind(s)")
+	conditions := meta.FindStatusCondition(obj.Status.Conditions, serviceprovider.ServiceProviderConditionReady)
+	assert.Equal(t, "waiting for user resources to be deleted: Metric", conditions.Message)
 }
 
 func TestDelete_ProceedsWhenNoCRDsInstalled(t *testing.T) {
 	// Guard passes (no CRDs) → createObjectManager is reached, which will error due to missing
 	// platform/workload clusters. That error is fine — we only care the guard didn't block.
 	obj := moWithInstanceID()
-	onboarding := clusters.NewTestClusterFromClient("onboarding",
-		fake.NewClientBuilder().WithRESTMapper(
-			testrestmapper.TestOnlyStaticRESTMapper(onboardingScheme()),
-		).WithScheme(onboardingScheme()).WithObjects(obj).Build(),
-	)
-	r := &MetricsOperatorReconciler{OnboardingCluster: onboarding}
+
+	r := &MetricsOperatorReconciler{OnboardingCluster: onboardingClient()}
 
 	mcp := mcpClientNoCRDs()
 	result, _ := r.Delete(context.Background(), obj, &apiv1alpha1.ProviderConfig{}, clusteraccess.ClusterContext{

@@ -3,6 +3,7 @@ package mcpresources
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -11,14 +12,20 @@ import (
 )
 
 const (
-	metricsGroup   = "metrics.openmcp.cloud"
-	metricsVersion = "v1alpha1"
+	MetricsGroup   = "metrics.open-control-plane.io"
+	MetricsVersion = "v1alpha1"
 )
 
 // metricsListGVKs are the list GVKs for CRs that the metrics-operator installs on the MCP.
+// Keep in sync with https://github.com/openmcp-project/metrics-operator/tree/main/api/v1alpha1
 var metricsListGVKs = []schema.GroupVersionKind{
-	{Group: metricsGroup, Version: metricsVersion, Kind: "MetricList"},
-	{Group: metricsGroup, Version: metricsVersion, Kind: "ManagedMetricList"},
+	{Group: MetricsGroup, Version: MetricsVersion, Kind: "DataSinkList"},
+	{Group: MetricsGroup, Version: MetricsVersion, Kind: "FederatedClusterAccessList"},
+	{Group: MetricsGroup, Version: MetricsVersion, Kind: "FederatedManagedMetricList"},
+	{Group: MetricsGroup, Version: MetricsVersion, Kind: "FederatedMetricList"},
+	{Group: MetricsGroup, Version: MetricsVersion, Kind: "ManagedMetricList"},
+	{Group: MetricsGroup, Version: MetricsVersion, Kind: "MetricList"},
+	{Group: MetricsGroup, Version: MetricsVersion, Kind: "RemoteClusterAccessList"},
 }
 
 // BlockingKinds lists the CRD kinds that still have instances on the cluster, blocking deletion.
@@ -36,7 +43,7 @@ func BlockingKinds(ctx context.Context, cl client.Client) ([]string, error) {
 		}
 		if len(list.Items) > 0 {
 			// Report the singular Kind (strip "List" suffix) for the condition message.
-			blocking = append(blocking, gvk.Kind[:len(gvk.Kind)-4])
+			blocking = append(blocking, strings.TrimSuffix(gvk.Kind, "List"))
 		}
 	}
 	return blocking, nil
