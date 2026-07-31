@@ -11,12 +11,12 @@
 | Criterion                         | Status | Notes                                          |
 | --------------------------------- | :----: | ---------------------------------------------- |
 | Deletion behaviour                |   ✅    | only captures metrics-operator >= v1 resources |
-| Status reporting & error messages |   ❌    |                                                |
-| Operation annotations             |   ❌    |                                                |
-| API stability policy              |   ❌    |                                                |
+| Status reporting & error messages |   ✅    |                                                |
+| Operation annotations             |   ✅    |                                                |
+| API stability policy              |   ✅    |                                                |
 | Custom CA support                 |   ❌    |                                                |
 | Release artifacts (image + OCM)   |   ❌    |                                                |
-| Testing                           |   ❌    |                                                |
+| Testing                           |   ✅    |                                                |
 | Ownership and maintenance docs    |   ❌    |                                                |
 
 See the [OpenControlPlane Quality Criteria](https://open-control-plane.io/developers/serviceprovider/quality-criteria) for definitions.

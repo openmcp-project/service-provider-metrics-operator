@@ -195,6 +195,10 @@ func TestServiceProvider(t *testing.T) {
 				}
 
 				// Trigger deletion of the MetricsOperator.
+				if err := apiv1alpha1.AddToScheme(onboardingConfig.Client().Resources().GetScheme()); err != nil {
+					t.Errorf("failed to register MetricsOperator scheme: %v", err)
+					return ctx
+				}
 				mo := &apiv1alpha1.MetricsOperator{}
 				if err := onboardingConfig.Client().Resources().Get(ctx, testMCP, corev1.NamespaceDefault, mo); err != nil {
 					t.Errorf("failed to get MetricsOperator: %v", err)

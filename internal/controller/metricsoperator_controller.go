@@ -134,7 +134,6 @@ func updateStatusError(obj *apiv1alpha1.MetricsOperator, resourceErrors bool, er
 }
 
 // userErrorMessage constructs an end-user facing error message.
-// Only end-user errors are processed.
 func userErrorMessage(err error) string {
 	if err == nil {
 		return ""
@@ -142,6 +141,9 @@ func userErrorMessage(err error) string {
 	errorMessages := []string{}
 	if errors.Is(err, ErrManagedResources) {
 		errorMessages = append(errorMessages, ErrManagedResources.Error())
+	}
+	if len(errorMessages) == 0 {
+		return err.Error()
 	}
 	return strings.Join(errorMessages, "; ")
 }
