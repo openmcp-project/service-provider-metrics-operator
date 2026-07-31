@@ -1,6 +1,7 @@
 package helm
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -66,6 +67,48 @@ func TestExtractHelmValues(t *testing.T) {
 			}
 			assert.NoError(t, err)
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestAddDefaultHelmValues_SetsOperatorConfigNamespace(t *testing.T) {
+	tests := []struct {
+		name      string
+		namespace string
+		values    *apiextensionsv1.JSON
+	}{
+		{
+			name:      "default metrics-operator namespace",
+			namespace: "metrics-operator",
+			values:    nil,
+		},
+		{
+			name:      "custom namespace override",
+			namespace: "custom-ns",
+			values:    &apiextensionsv1.JSON{Raw: []byte(`{"namespaceOverride":"custom-ns"}`)},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := AddDefaultHelmValues(tt.values, tt.namespace)
+			assert.NoError(t, err)
+
+			var root map[string]json.RawMessage
+			assert.NoError(t, json.Unmarshal(got.Raw, &root))
+
+			// OPERATOR_CONFIG_NAMESPACE in manager.extraEnv
+			var manager map[string]json.RawMessage
+			assert.NoError(t, json.Unmarshal(root["manager"], &manager))
+			var envs []corev1.EnvVar
+			assert.NoError(t, json.Unmarshal(manager["extraEnv"], &envs))
+			found := false
+			for _, e := range envs {
+				if e.Name == "OPERATOR_CONFIG_NAMESPACE" {
+					assert.Equal(t, tt.namespace, e.Value)
+					found = true
+				}
+			}
+			assert.True(t, found, "OPERATOR_CONFIG_NAMESPACE not found in manager.extraEnv")
 		})
 	}
 }
