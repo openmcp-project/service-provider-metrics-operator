@@ -21,8 +21,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	apiv1alpha1 "github.com/openmcp-project/service-provider-metrics-operator/api/v1alpha1"
-	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/instance"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/cpresources"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/instance"
 )
 
 // onboardingScheme includes MetricsOperator so the fake onboarding client accepts it.

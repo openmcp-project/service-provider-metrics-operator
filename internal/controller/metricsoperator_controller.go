@@ -41,10 +41,10 @@ import (
 	apiv1alpha1 "github.com/openmcp-project/service-provider-metrics-operator/api/v1alpha1"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/authn"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/authz"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/cpresources"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/flux"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/helm"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/instance"
-	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/cpresources"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/objectutils"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/resources"
 )
