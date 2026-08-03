@@ -7,6 +7,9 @@ vars:
   CODE_DIRS: "{{.ROOT_DIR}}/cmd/... {{.ROOT_DIR}}/internal/... {{.ROOT_DIR}}/api/v1alpha1/..."
   COMPONENTS: "service-provider-metrics-operator"
   REPO_URL: "https://github.com/openmcp-project/service-provider-metrics-operator"
+  CHART_COMPONENTS: "[]"
+  CRDS_COMPONENTS: 'service-provider-metrics-operator'
+  CRDS_PATH: '{{.ROOT_DIR}}/api/crds/manifests'
   COMMON_SCRIPT_DIR: "{{.ROOT_DIR}}/hack/common"
 
 includes:
