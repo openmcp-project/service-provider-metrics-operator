@@ -27,7 +27,7 @@ import (
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/instance"
 )
 
-var testMCP = ""
+var testCP = ""
 
 func TestServiceProvider(t *testing.T) {
 	var onboardingList unstructured.UnstructuredList
@@ -62,7 +62,7 @@ func TestServiceProvider(t *testing.T) {
 				}
 				for i := range objList.Items {
 					if objList.Items[i].GetKind() == "ControlPlane" {
-						testMCP = objList.Items[i].GetName()
+						testCP = objList.Items[i].GetName()
 					}
 				}
 				var wg sync.WaitGroup
@@ -98,7 +98,7 @@ func TestServiceProvider(t *testing.T) {
 					t.Errorf("failed to get platform cluster config: %v", err)
 					return ctx
 				}
-				tenantNamespace, err := libutils.StableMCPNamespace(testMCP, "default")
+				tenantNamespace, err := libutils.StableMCPNamespace(testCP, "default")
 				if err != nil {
 					t.Errorf("failed to get tenant namespace: %v", err)
 					return ctx
@@ -142,8 +142,8 @@ func TestServiceProvider(t *testing.T) {
 					return ctx
 				}
 				obj := &apiv1alpha1.MetricsOperator{}
-				if err := onboardingConfig.Client().Resources().Get(ctx, testMCP, corev1.NamespaceDefault, obj); err != nil {
-					t.Errorf("failed to get MetricsOperator %s/%s: %v", corev1.NamespaceDefault, testMCP, err)
+				if err := onboardingConfig.Client().Resources().Get(ctx, testCP, corev1.NamespaceDefault, obj); err != nil {
+					t.Errorf("failed to get MetricsOperator %s/%s: %v", corev1.NamespaceDefault, testCP, err)
 					return ctx
 				}
 				workloadNamespace := instance.Namespace(obj)
@@ -166,7 +166,7 @@ func TestServiceProvider(t *testing.T) {
 				// The Metric CRD is installed on the MCP cluster by the metrics-operator once
 				// it is running, so retry until the CRD and the MCP cluster are available.
 				if err := wait.For(func(ctx context.Context) (bool, error) {
-					_, createErr := clusterutils.ImportToMCPCluster(ctx, platformConfig, testMCP, "mcp")
+					_, createErr := clusterutils.ImportToMCPCluster(ctx, platformConfig, testCP, "mcp")
 					if createErr != nil {
 						if strings.Contains(createErr.Error(), "no matches for") ||
 							strings.Contains(createErr.Error(), "not found") {
@@ -200,7 +200,7 @@ func TestServiceProvider(t *testing.T) {
 					return ctx
 				}
 				mo := &apiv1alpha1.MetricsOperator{}
-				if err := onboardingConfig.Client().Resources().Get(ctx, testMCP, corev1.NamespaceDefault, mo); err != nil {
+				if err := onboardingConfig.Client().Resources().Get(ctx, testCP, corev1.NamespaceDefault, mo); err != nil {
 					t.Errorf("failed to get MetricsOperator: %v", err)
 					return ctx
 				}
@@ -216,13 +216,13 @@ func TestServiceProvider(t *testing.T) {
 				}
 
 				// Remove the Metric CRs from the MCP so deletion can proceed.
-				metricList, delErr := clusterutils.ImportToMCPCluster(ctx, platformConfig, testMCP, "mcp")
+				metricList, delErr := clusterutils.ImportToMCPCluster(ctx, platformConfig, testCP, "mcp")
 				if delErr != nil {
 					t.Logf("could not list mcp objects for cleanup (CRD may already be gone): %v", delErr)
 				} else {
 					for i := range metricList.Items {
 						obj := &metricList.Items[i]
-						mcpConfig, mcpErr := clusterutils.MCPConfig(ctx, platformConfig, testMCP)
+						mcpConfig, mcpErr := clusterutils.MCPConfig(ctx, platformConfig, testCP)
 						if mcpErr != nil {
 							t.Errorf("failed to get MCP config: %v", mcpErr)
 							return ctx

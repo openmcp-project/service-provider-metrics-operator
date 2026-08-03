@@ -38,9 +38,9 @@ const (
 	Terminating InstancePhase = "Terminating"
 	Unknown     InstancePhase = "Unknown"
 
-	ManagedControlPlane ResourceLocation = "ManagedControlPlane"
-	PlatformCluster     ResourceLocation = "PlatformCluster"
-	WorkloadCluster     ResourceLocation = "WorkloadCluster"
+	ControlPlane    ResourceLocation = "ControlPlane"
+	PlatformCluster ResourceLocation = "PlatformCluster"
+	WorkloadCluster ResourceLocation = "WorkloadCluster"
 )
 
 // MetricsOperatorSpec defines the desired state of MetricsOperator

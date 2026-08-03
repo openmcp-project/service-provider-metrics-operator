@@ -29,7 +29,7 @@ func Configure(cluster resources.ManagedCluster, msa *authn.ManagedServiceAccoun
 					Namespace: msa.Namespace,
 				},
 			}
-			// TODO: define minimum set of permissions the service provider requires on the MCP cluster
+			// TODO: define minimum set of permissions the service provider requires on the CP cluster
 			oCRB.RoleRef = rbacv1.RoleRef{
 				APIGroup: rbacv1.GroupName,
 				Kind:     "ClusterRole",

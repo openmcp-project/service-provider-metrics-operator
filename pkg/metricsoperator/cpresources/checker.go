@@ -1,4 +1,4 @@
-package mcpresources
+package cpresources
 
 import (
 	"context"
@@ -16,7 +16,7 @@ const (
 	MetricsVersion = "v1alpha1"
 )
 
-// metricsListGVKs are the list GVKs for CRs that the metrics-operator installs on the MCP.
+// metricsListGVKs are the list GVKs for CRs that the metrics-operator installs on the CP.
 // Keep in sync with https://github.com/openmcp-project/metrics-operator/tree/main/api/v1alpha1
 var metricsListGVKs = []schema.GroupVersionKind{
 	{Group: MetricsGroup, Version: MetricsVersion, Kind: "DataSinkList"},

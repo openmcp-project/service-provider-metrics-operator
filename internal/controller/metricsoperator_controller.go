@@ -44,7 +44,7 @@ import (
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/flux"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/helm"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/instance"
-	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/mcpresources"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/cpresources"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/objectutils"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/resources"
 )
@@ -86,7 +86,7 @@ func (r *MetricsOperatorReconciler) CreateOrUpdate(ctx context.Context, obj *api
 
 // Delete is called on every delete event
 func (r *MetricsOperatorReconciler) Delete(ctx context.Context, obj *apiv1alpha1.MetricsOperator, pc *apiv1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (ctrl.Result, error) {
-	blockingKinds, err := mcpresources.BlockingKinds(ctx, clusters.MCPCluster.Client())
+	blockingKinds, err := cpresources.BlockingKinds(ctx, clusters.MCPCluster.Client())
 	if err != nil {
 		serviceprovider.StatusProgressing(obj, conditionReasonError, err.Error())
 		return ctrl.Result{}, err
@@ -170,37 +170,37 @@ func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj
 
 	platformCluster := resources.NewManagedCluster(r.PlatformCluster, r.PlatformCluster.RESTConfig(), tenantNamespace, resources.PlatformCluster)
 	workloadCluster := resources.NewManagedCluster(clusters.WorkloadCluster, clusters.WorkloadCluster.RESTConfig(), instance.Namespace(obj), resources.WorkloadCluster)
-	mcpCluster := resources.NewManagedCluster(clusters.MCPCluster, clusters.MCPCluster.RESTConfig(), flux.DefaultNamespace, resources.ManagedControlPlane)
+	cpCluster := resources.NewManagedCluster(clusters.MCPCluster, clusters.MCPCluster.RESTConfig(), flux.DefaultNamespace, resources.ControlPlane)
 
-	metricsNamespace := mcpCluster.GetDefaultNamespace()
+	metricsNamespace := cpCluster.GetDefaultNamespace()
 	if helmValues.NamespaceOverride != "" {
 		metricsNamespace = helmValues.NamespaceOverride
 	}
 
-	// ### MCP RESOURCES ###
-	// ServiceAccount on MCP + token Secret on workload cluster so --install-crds connects to MCP.
-	mcpServiceAccount := &authn.ManagedServiceAccount{
+	// ### CP RESOURCES ###
+	// ServiceAccount on CP + token Secret on workload cluster so --install-crds connects to CP.
+	cpServiceAccount := &authn.ManagedServiceAccount{
 		NamespacedName: k8stypes.NamespacedName{
 			Name:      "metrics-operator-server",
 			Namespace: metricsNamespace,
 		},
 	}
 
-	mcpServiceAccount.Configure(workloadCluster, mcpCluster, pc.PollInterval())
+	cpServiceAccount.Configure(workloadCluster, cpCluster, pc.PollInterval())
 
-	moVersion.HelmValues, err = helm.AddAuthToHelmValues(moVersion.HelmValues, mcpCluster, mcpServiceAccount.KubeAPIAccess())
+	moVersion.HelmValues, err = helm.AddAuthToHelmValues(moVersion.HelmValues, cpCluster, cpServiceAccount.KubeAPIAccess())
 	if err != nil {
-		return nil, fmt.Errorf("failed to inject MCP auth into helm values: %w", err)
+		return nil, fmt.Errorf("failed to inject CP auth into helm values: %w", err)
 	}
 	moVersion.HelmValues, err = helm.AddDefaultHelmValues(moVersion.HelmValues, metricsNamespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to set default helm values: %w", err)
 	}
-	authz.Configure(mcpCluster, mcpServiceAccount)
+	authz.Configure(cpCluster, cpServiceAccount)
 
 	flux.ManageFluxResources(flux.ManageFluxResourcesParams{
 		Cluster:           platformCluster,
-		MCPNamespace:      metricsNamespace,
+		CPNamespace:       metricsNamespace,
 		WorkloadNamespace: instance.Namespace(obj),
 		Obj:               obj,
 		Interval:          pc.PollInterval(),
@@ -209,7 +209,7 @@ func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj
 	})
 
 	mgr := resources.NewManager()
-	mgr.AddCluster(mcpCluster)
+	mgr.AddCluster(cpCluster)
 	mgr.AddCluster(workloadCluster)
 	mgr.AddCluster(platformCluster)
 

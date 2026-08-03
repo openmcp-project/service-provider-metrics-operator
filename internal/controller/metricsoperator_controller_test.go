@@ -22,7 +22,7 @@ import (
 
 	apiv1alpha1 "github.com/openmcp-project/service-provider-metrics-operator/api/v1alpha1"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/instance"
-	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/mcpresources"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/cpresources"
 )
 
 // onboardingScheme includes MetricsOperator so the fake onboarding client accepts it.
@@ -45,14 +45,14 @@ func hideCrdInterceptor(hiddenCRDs ...string) interceptor.Funcs {
 	}
 }
 
-func mcpClientWith(objs ...client.ObjectList) *clusters.Cluster {
+func cpClientWith(objs ...client.ObjectList) *clusters.Cluster {
 	cl := fake.NewClientBuilder().WithLists(objs...).Build()
-	return clusters.NewTestClusterFromClient("mcp", cl)
+	return clusters.NewTestClusterFromClient("cp", cl)
 }
 
-func mcpClientNoCRDs() *clusters.Cluster {
+func cpClientNoCRDs() *clusters.Cluster {
 	cl := fake.NewClientBuilder().WithInterceptorFuncs(hideCrdInterceptor("MetricList", "ManagedMetricList")).Build()
-	return clusters.NewTestClusterFromClient("mcp", cl)
+	return clusters.NewTestClusterFromClient("cp", cl)
 }
 
 func onboardingClient(objs ...client.Object) *clusters.Cluster {
@@ -61,10 +61,10 @@ func onboardingClient(objs ...client.Object) *clusters.Cluster {
 	return clusters.NewTestClusterFromClient("onboarding", onboardingClient)
 }
 
-func metricOnMCP(ns, name string) client.ObjectList {
+func metricOnCP(ns, name string) client.ObjectList {
 	u := unstructured.Unstructured{}
 	u.SetGroupVersionKind(schema.GroupVersionKind{
-		Group: mcpresources.MetricsGroup, Version: mcpresources.MetricsVersion, Kind: "Metric",
+		Group: cpresources.MetricsGroup, Version: cpresources.MetricsVersion, Kind: "Metric",
 	})
 	u.SetNamespace(ns)
 	u.SetName(name)
@@ -88,9 +88,9 @@ func TestDelete_BlockedWhileMetricCRsExist(t *testing.T) {
 
 	r := &MetricsOperatorReconciler{OnboardingCluster: onboardingClient(obj)}
 
-	mcp := mcpClientWith(metricOnMCP("default", "my-metric"))
+	cp := cpClientWith(metricOnCP("default", "my-metric"))
 	result, err := r.Delete(context.Background(), obj, &apiv1alpha1.ProviderConfig{}, clusteraccess.ClusterContext{
-		MCPCluster: mcp,
+		MCPCluster: cp,
 	})
 
 	require.NoError(t, err)
@@ -108,9 +108,9 @@ func TestDelete_ProceedsWhenNoCRDsInstalled(t *testing.T) {
 
 	r := &MetricsOperatorReconciler{OnboardingCluster: onboardingClient()}
 
-	mcp := mcpClientNoCRDs()
+	cp := cpClientNoCRDs()
 	result, _ := r.Delete(context.Background(), obj, &apiv1alpha1.ProviderConfig{}, clusteraccess.ClusterContext{
-		MCPCluster: mcp,
+		MCPCluster: cp,
 	})
 
 	assert.Equal(t, ctrl.Result{}, result, "guard must not block when CRDs are absent")
@@ -125,9 +125,9 @@ func TestDelete_ProceedsWhenNoMetricCRs(t *testing.T) {
 	)
 	r := &MetricsOperatorReconciler{OnboardingCluster: onboarding}
 
-	mcp := mcpClientWith() // CRDs present but no CRs
+	cp := cpClientWith() // CRDs present but no CRs
 	result, _ := r.Delete(context.Background(), obj, &apiv1alpha1.ProviderConfig{}, clusteraccess.ClusterContext{
-		MCPCluster: mcp,
+		MCPCluster: cp,
 	})
 
 	assert.Equal(t, ctrl.Result{}, result, "guard must not block when no CRs exist")

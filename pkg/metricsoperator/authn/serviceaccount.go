@@ -41,7 +41,7 @@ type serviceAccountToken struct {
 
 // generateToken generates a token for the given ServiceAccount. If successful, it returns the token and
 // the actual lifetime of it, which might deviate from the desired lifetime.
-func generateToken(ctx context.Context, mcp *clusters.Cluster, cfg *rest.Config, svcAccRef types.NamespacedName, expiration time.Duration) (*serviceAccountToken, error) {
+func generateToken(ctx context.Context, cp *clusters.Cluster, cfg *rest.Config, svcAccRef types.NamespacedName, expiration time.Duration) (*serviceAccountToken, error) {
 	if svcAccRef.Name == "" || svcAccRef.Namespace == "" {
 		return nil, errSANameOrNamespaceEmpty
 	}
@@ -53,7 +53,7 @@ func generateToken(ctx context.Context, mcp *clusters.Cluster, cfg *rest.Config,
 	}
 
 	sa := &corev1.ServiceAccount{}
-	if err := mcp.Client().Get(ctx, types.NamespacedName{Name: svcAccRef.Name, Namespace: svcAccRef.Namespace}, sa); err != nil {
+	if err := cp.Client().Get(ctx, types.NamespacedName{Name: svcAccRef.Name, Namespace: svcAccRef.Namespace}, sa); err != nil {
 		return nil, err
 	}
 
@@ -62,7 +62,7 @@ func generateToken(ctx context.Context, mcp *clusters.Cluster, cfg *rest.Config,
 			ExpirationSeconds: new(int64(expiration.Seconds())),
 		},
 	}
-	if err := mcp.Client().SubResource("token").Create(ctx, sa, req); err != nil {
+	if err := cp.Client().SubResource("token").Create(ctx, sa, req); err != nil {
 		return nil, err
 	}
 
@@ -284,9 +284,9 @@ func unmarshalIfPresent(obj map[string]json.RawMessage, key string, out any) err
 	return nil
 }
 
-// Configure adds a managed ServiceAccount object to the given MCP cluster and a managed Secret object to the given workload cluster.
-func (m *ManagedServiceAccount) Configure(workloadCluster, mcpCluster resources.ManagedCluster, pollInterval time.Duration) {
-	// Add a namespace on the MCP cluster so the service account has a place to live.
+// Configure adds a managed ServiceAccount object to the given CP cluster and a managed Secret object to the given workload cluster.
+func (m *ManagedServiceAccount) Configure(workloadCluster, cpCluster resources.ManagedCluster, pollInterval time.Duration) {
+	// Add a namespace on the CP cluster so the service account has a place to live.
 	ns := resources.NewManagedObject(&corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: m.Namespace,
@@ -295,9 +295,9 @@ func (m *ManagedServiceAccount) Configure(workloadCluster, mcpCluster resources.
 		ReconcileFunc: resources.NoOp,
 		StatusFunc:    resources.SimpleStatus,
 	})
-	mcpCluster.AddObject(ns)
+	cpCluster.AddObject(ns)
 
-	// Add a service account on the MCP cluster.
+	// Add a service account on the CP cluster.
 	sa := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      m.Name,
@@ -309,7 +309,7 @@ func (m *ManagedServiceAccount) Configure(workloadCluster, mcpCluster resources.
 		ReconcileFunc: resources.NoOp,
 		StatusFunc:    resources.SimpleStatus,
 	})
-	mcpCluster.AddObject(msa)
+	cpCluster.AddObject(msa)
 
 	// Add a secret on the local cluster that contains a token for the remote service account.
 	wcNamespace := &corev1.Namespace{
@@ -344,13 +344,13 @@ func (m *ManagedServiceAccount) Configure(workloadCluster, mcpCluster resources.
 			nextReconcile := time.Now().Add(pollInterval).Add(time.Minute)
 			expirationTime, err := getTokenExpirationTime(oSecret)
 			if err != nil || expirationTime.Before(nextReconcile) {
-				rc, err := generateToken(ctx, mcpCluster.GetCluster(), mcpCluster.GetConfig(), m.NamespacedName, 1*time.Hour)
+				rc, err := generateToken(ctx, cpCluster.GetCluster(), cpCluster.GetConfig(), m.NamespacedName, 1*time.Hour)
 				if err != nil {
 					return err
 				}
 				oSecret.Data = map[string][]byte{
 					"token":     []byte(rc.Token),
-					"namespace": []byte(mcpCluster.GetDefaultNamespace()),
+					"namespace": []byte(cpCluster.GetDefaultNamespace()),
 					"ca.crt":    rc.CAData,
 				}
 				setTokenExpirationTime(oSecret, rc.TokenExpiry)
