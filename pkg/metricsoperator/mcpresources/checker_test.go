@@ -17,8 +17,8 @@ import (
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/mcpresources"
 )
 
-// HideCrdInterceptor hides listed Kinds from the REST mapper, simulating absent CRDs.
-func HideCrdInterceptor(hiddenCRDs ...string) interceptor.Funcs {
+// hideCrdInterceptor hides listed Kinds from the REST mapper, simulating absent CRDs.
+func hideCrdInterceptor(hiddenCRDs ...string) interceptor.Funcs {
 	return interceptor.Funcs{
 		List: func(ctx context.Context, client client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
 			gvk := list.GetObjectKind().GroupVersionKind()
@@ -31,7 +31,7 @@ func HideCrdInterceptor(hiddenCRDs ...string) interceptor.Funcs {
 }
 
 func newFakeClient(hidden []string, objs ...client.Object) client.Client {
-	return fake.NewClientBuilder().WithInterceptorFuncs(HideCrdInterceptor(hidden...)).WithObjects(objs...).Build()
+	return fake.NewClientBuilder().WithInterceptorFuncs(hideCrdInterceptor(hidden...)).WithObjects(objs...).Build()
 }
 
 func metricObj(ns, name string) client.Object {

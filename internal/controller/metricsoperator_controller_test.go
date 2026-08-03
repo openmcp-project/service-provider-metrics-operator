@@ -32,8 +32,8 @@ func onboardingScheme() *runtime.Scheme {
 	return s
 }
 
-// HideCrdInterceptor hides listed Kinds from the REST mapper, simulating absent CRDs.
-func HideCrdInterceptor(hiddenCRDs ...string) interceptor.Funcs {
+// hideCrdInterceptor hides listed Kinds from the REST mapper, simulating absent CRDs.
+func hideCrdInterceptor(hiddenCRDs ...string) interceptor.Funcs {
 	return interceptor.Funcs{
 		List: func(ctx context.Context, client client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
 			gvk := list.GetObjectKind().GroupVersionKind()
@@ -51,7 +51,7 @@ func mcpClientWith(objs ...client.ObjectList) *clusters.Cluster {
 }
 
 func mcpClientNoCRDs() *clusters.Cluster {
-	cl := fake.NewClientBuilder().WithInterceptorFuncs(HideCrdInterceptor("MetricList", "ManagedMetricList")).Build()
+	cl := fake.NewClientBuilder().WithInterceptorFuncs(hideCrdInterceptor("MetricList", "ManagedMetricList")).Build()
 	return clusters.NewTestClusterFromClient("mcp", cl)
 }
 
