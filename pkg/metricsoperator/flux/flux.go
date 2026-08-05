@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	// DefaultNamespace is the default namespace where Metrics Operator components are deployed on the ManagedControlPlane
+	// DefaultNamespace is the default namespace where Metrics Operator components are deployed on the ControlPlane
 	DefaultNamespace = "metrics-operator"
 	// OCIRepositoryName is the name of the Metrics Operator OCIRepository resource
 	OCIRepositoryName = "metrics-operator"
@@ -33,8 +33,8 @@ const (
 type ManageFluxResourcesParams struct {
 	// Cluster defines where the resources will be created
 	Cluster resources.ManagedCluster
-	// MCPNamespace defines the namespace name that deploys Metrics Operator
-	MCPNamespace string
+	// CPNamespace defines the namespace name that deploys Metrics Operator
+	CPNamespace string
 	// WorkloadNamespace defines the target namespace on the workload cluster where the chart is deployed
 	WorkloadNamespace string
 	// ChartPullSecretName defines the name of the secret copy that will be placed in the Cluster namespace

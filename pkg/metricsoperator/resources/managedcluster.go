@@ -9,15 +9,15 @@ import (
 )
 
 const (
-	// ManagedControlPlane indicates that a cluster is a managed control plane.
-	ManagedControlPlane ClusterType = "ManagedControlPlane"
+	// ControlPlane indicates that a cluster is a control plane.
+	ControlPlane ClusterType = "ControlPlane"
 	// PlatformCluster indicates that a cluster is a platform cluster.
 	PlatformCluster ClusterType = "PlatformCluster"
 	// WorkloadCluster indicates that a cluster is a workload cluster.
 	WorkloadCluster ClusterType = "WorkloadCluster"
 )
 
-// ClusterType distinguishes between managed control plane and workload clusters.
+// ClusterType distinguishes between control plane and workload clusters.
 type ClusterType string
 
 // NewManagedCluster creates a new ManagedCluster instance.

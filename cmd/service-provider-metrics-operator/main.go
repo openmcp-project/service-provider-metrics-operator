@@ -64,7 +64,7 @@ import (
 var (
 	platformScheme   = runtime.NewScheme()
 	onboardingScheme = runtime.NewScheme()
-	mcpScheme        = runtime.NewScheme()
+	cpScheme         = runtime.NewScheme()
 	workloadScheme   = runtime.NewScheme()
 	setupLog         = ctrl.Log.WithName("setup")
 )
@@ -73,7 +73,7 @@ func init() {
 	// +kubebuilder:scaffold:scheme
 	initPlatformScheme()
 	initOnboardingScheme()
-	initMcpScheme()
+	initCpScheme()
 	initWorkloadScheme()
 }
 
@@ -93,9 +93,9 @@ func initOnboardingScheme() {
 	utilruntime.Must(metricsoperatorsv1alpha1.AddToScheme(onboardingScheme))
 }
 
-func initMcpScheme() {
-	utilruntime.Must(clientgoscheme.AddToScheme(mcpScheme))
-	utilruntime.Must(apiextensionv1.AddToScheme(mcpScheme))
+func initCpScheme() {
+	utilruntime.Must(clientgoscheme.AddToScheme(cpScheme))
+	utilruntime.Must(apiextensionv1.AddToScheme(cpScheme))
 }
 func initWorkloadScheme() {
 	utilruntime.Must(clientgoscheme.AddToScheme(workloadScheme))
@@ -319,8 +319,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// TODO: define minimum set of permission the service provider requires on the mcp cluster
-	mcpTokenAccessConfig := &clustersv1alpha1.TokenConfig{
+	// TODO: define minimum set of permission the service provider requires on the cp cluster
+	cpTokenAccessConfig := &clustersv1alpha1.TokenConfig{
 		Permissions: []clustersv1alpha1.PermissionsRequest{
 			{
 				// Create NS -> pkg/metricsoperator/authn/serviceaccount.go:299
@@ -340,7 +340,7 @@ func main() {
 			},
 		},
 	}
-	mcpClusterRequest := advanced.ExistingClusterRequest(clustersv1alpha1.PURPOSE_MCP, "mcp", func(req reconcile.Request, _ ...any) (*common.ObjectReference, error) {
+	cpClusterRequest := advanced.ExistingClusterRequest(clustersv1alpha1.PURPOSE_MCP, "cp", func(req reconcile.Request, _ ...any) (*common.ObjectReference, error) {
 		namespace, err := utils.StableMCPNamespace(req.Name, req.Namespace)
 		if err != nil {
 			return nil, err
@@ -351,8 +351,8 @@ func main() {
 		}, nil
 	}).
 		WithNamespaceGenerator(advanced.DefaultNamespaceGeneratorForMCP).
-		WithTokenAccess(mcpTokenAccessConfig).
-		WithScheme(mcpScheme).
+		WithTokenAccess(cpTokenAccessConfig).
+		WithScheme(cpScheme).
 		Build()
 
 	// TODO: define minimum set of permission the service provider requires on the workload cluster
@@ -396,7 +396,7 @@ func main() {
 				openmcpconst.OnboardingNamespaceLabel: req.Namespace,
 			}
 		}).
-		Register(mcpClusterRequest).
+		Register(cpClusterRequest).
 		Register(workloadClusterRequest).
 		WithRetryInterval(10 * time.Second)
 

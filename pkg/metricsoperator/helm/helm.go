@@ -39,14 +39,14 @@ func ExtractHelmValues(values *apiextensionsv1.JSON) (*HelmValues, error) {
 	return vals, nil
 }
 
-// AddDefaultHelmValues sets helm values that are required for the MCP deployment
-func AddDefaultHelmValues(values *apiextensionsv1.JSON, mcpNamespace string) (*apiextensionsv1.JSON, error) {
+// AddDefaultHelmValues sets helm values that are required for the CP deployment
+func AddDefaultHelmValues(values *apiextensionsv1.JSON, cpNamespace string) (*apiextensionsv1.JSON, error) {
 	root, err := unmarshalRoot(values)
 	if err != nil {
 		return nil, err
 	}
 
-	root["manager"], err = patchEnvVars(root["manager"], corev1.EnvVar{Name: "OPERATOR_CONFIG_NAMESPACE", Value: mcpNamespace})
+	root["manager"], err = patchEnvVars(root["manager"], corev1.EnvVar{Name: "OPERATOR_CONFIG_NAMESPACE", Value: cpNamespace})
 	if err != nil {
 		return nil, fmt.Errorf("manager: %w", err)
 	}
@@ -66,7 +66,7 @@ func AddDefaultHelmValues(values *apiextensionsv1.JSON, mcpNamespace string) (*a
 
 // AddAuthToHelmValues injects a kube-api-access volume (from the SA token Secret) and
 // KUBERNETES_SERVICE_HOST/PORT env vars into the init and manager containers so the
-// metrics-operator --install-crds init container connects to the MCP cluster.
+// metrics-operator --install-crds init container connects to the CP cluster.
 // nolint:gocyclo
 func AddAuthToHelmValues(values *apiextensionsv1.JSON, remoteCluster resources.ManagedCluster, saName string) (*apiextensionsv1.JSON, error) {
 	authVolume := corev1.Volume{

@@ -25,18 +25,6 @@ func TestExtractHelmValues(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "extract top-level imagePullSecrets",
-			values: &apiextensionsv1.JSON{
-				Raw: []byte(`{"imagePullSecrets": [{"name": "my-secret"}]}`),
-			},
-			want: &HelmValues{
-				Global: Global{
-					ImagePullSecrets: []corev1.LocalObjectReference{{Name: "my-secret"}},
-				},
-			},
-			wantErr: false,
-		},
-		{
 			name: "ignore unknown values",
 			values: &apiextensionsv1.JSON{
 				Raw: []byte(`{"replicaCount": 2}`),

@@ -8,16 +8,16 @@
 
 [![Quality: Experimental](https://img.shields.io/badge/Quality-Experimental-e69138?style=flat-square&labelColor=555)](https://open-control-plane.io/developers/serviceprovider/quality-criteria)
 
-| Criterion                         | Status  | Notes |
-| --------------------------------- | :----:  | ----- |
-| Deletion behaviour                |   ❌    |       |
-| Status reporting & error messages |   ❌    |       |
-| Operation annotations             |   ❌    |       |
-| API stability policy              |   ❌    |       |
-| Custom CA support                 |   ❌    |       |
-| Release artifacts (image + OCM)   |   ❌    |       |
-| Testing                           |   ❌    |       |
-| Ownership and maintenance docs    |   ❌    |       |
+| Criterion                         | Status | Notes                                          |
+| --------------------------------- | :----: | ---------------------------------------------- |
+| Deletion behaviour                |   ✅    | only captures metrics-operator >= v1 resources |
+| Status reporting & error messages |   ✅    |                                                |
+| Operation annotations             |   ✅    |                                                |
+| API stability policy              |   ✅    |                                                |
+| Custom CA support                 |   ❌    |                                                |
+| Release artifacts (image + OCM)   |   ❌    |                                                |
+| Testing                           |   ✅    |                                                |
+| Ownership and maintenance docs    |   ❌    |                                                |
 
 See the [OpenControlPlane Quality Criteria](https://open-control-plane.io/developers/serviceprovider/quality-criteria) for definitions.
 
