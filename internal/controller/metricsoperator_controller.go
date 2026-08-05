@@ -94,7 +94,7 @@ func (r *MetricsOperatorReconciler) Delete(ctx context.Context, obj *apiv1alpha1
 		serviceprovider.StatusTerminatingWithReason(obj, "UserResourcesExist", msg)
 		return ctrl.Result{RequeueAfter: time.Second * 5}, nil
 	}
-	serviceprovider.StatusTerminating(obj)
+	serviceprovider.StatusTerminatingWithReason(obj, "Reconciling", "deletion in progress")
 
 	mgr, err := r.createObjectManager(ctx, obj, pc, clusters)
 	if err != nil {
