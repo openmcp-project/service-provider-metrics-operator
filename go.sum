@@ -35,8 +35,8 @@ github.com/evanphx/json-patch/v5 v5.9.11 h1:/8HVnzMq13/3x9TPvjG08wUGqBTmZBsCWzjT
 github.com/evanphx/json-patch/v5 v5.9.11/go.mod h1:3j+LviiESTElxA4p3EMKAB9HXj3/XEtnUf6OZxqIQTM=
 github.com/felixge/httpsnoop v1.0.4 h1:NFTV2Zj1bL4mc9sqWACXbQFVBBg2W3GPvqp8/ESS2Wg=
 github.com/felixge/httpsnoop v1.0.4/go.mod h1:m8KPJKqk1gH5J9DgRY2ASl2lWCfGKXixSwevea8zH2U=
-github.com/fluxcd/flux2/v2 v2.9.3 h1:vog4HYpH5aOeVLGk4G2EpFSm+K0EVhzeIMXFNTsn/A8=
-github.com/fluxcd/flux2/v2 v2.9.3/go.mod h1:RDvLv3P4oMvhgUERp89JlSgTrVXjMFzrHapzIuG9Y3Y=
+github.com/fluxcd/flux2/v2 v2.9.4 h1:/o9IdC9YZVFEsnuJawjEn5tpU8gpnxGftsG85Ubw+bI=
+github.com/fluxcd/flux2/v2 v2.9.4/go.mod h1:M0KHKxqnnSEmiOccMWfDfFc4lRs9za7XYZK1O4PNDx8=
 github.com/fluxcd/helm-controller/api v1.6.3 h1:8EvQASKKFDEj8Ub3xhMSjyNbGTEjNqlHZYm5WhRxJvg=
 github.com/fluxcd/helm-controller/api v1.6.3/go.mod h1:CaI5bHedusLcXYj1+pkd4RkSE8TtiEHI3ReHNsUySbg=
 github.com/fluxcd/kustomize-controller/api v1.9.4 h1:3Hf5322qL5G9Sb6m3oTcv4xQo9xDIi8vLOFQQvW8Jug=
@@ -165,8 +165,8 @@ github.com/openmcp-project/openmcp-operator/api v1.3.0 h1:RgetVDqslJPD7/nb65AbqW
 github.com/openmcp-project/openmcp-operator/api v1.3.0/go.mod h1:GMCkaGUND5Qu3zTNjpYtR44her8gcOksHkrJu5isL6I=
 github.com/openmcp-project/openmcp-operator/lib v1.3.0 h1:Icx40/Qx/85+E8vWTMi1jW1WrX/MFN+FaZTDt7JWcRU=
 github.com/openmcp-project/openmcp-operator/lib v1.3.0/go.mod h1:+Ptr+38neYaoGzEdY5zhR3uhfKqNZ2J9tyOcc15S7EY=
-github.com/openmcp-project/openmcp-testing v1.2.1-0.20260731121120-582e6897b46d h1:kvmNFA8MNj4u7i3srUJds+LbIluzczIoHq43uWoAo3w=
-github.com/openmcp-project/openmcp-testing v1.2.1-0.20260731121120-582e6897b46d/go.mod h1:BoqDcf0mL49bG7r0pI1wZyGlEZSX+MNf0HqLDBEzZAA=
+github.com/openmcp-project/openmcp-testing v1.2.1-0.20260811071150-c702bb6666e6 h1:ChTcb47OfHWy37bBjOHjIToIRlxLSOX7NmCScA5EGbo=
+github.com/openmcp-project/openmcp-testing v1.2.1-0.20260811071150-c702bb6666e6/go.mod h1:nDmEfNpCJkoC0BZJTAVTeadxLRJ0sTU94nBXkBmeP54=
 github.com/pelletier/go-toml v1.9.5 h1:4yBQzkHv+7BHq2PQUZF3Mx0IYxG7LsP222s7Agd3ve8=
 github.com/pelletier/go-toml v1.9.5/go.mod h1:u1nR/EPcESfeI/szUZKdtJ0xRNbUoANCkoOuaOx1Y+c=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=
