@@ -46,7 +46,7 @@ flowchart LR
   spmo -- creates --> ocirepo
   spmo -- creates --> helmrel
   helmrel -- installs --> wlmoctrl
-  helmrel -- installs --> crds
+  wlmoctrl -- installs --> crds
   wlmoctrl -- manages --> metrics
   mcpapi -- represents --> mcp
 ```
