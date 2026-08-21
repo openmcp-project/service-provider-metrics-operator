@@ -2,7 +2,9 @@ package helm
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/resources"
 	corev1 "k8s.io/api/core/v1"
@@ -12,7 +14,23 @@ import (
 const (
 	serviceAccountMountPath = "/var/run/secrets/kubernetes.io/serviceaccount"
 	serviceAccountVolume    = "kube-api-access"
+
+	// customCaVolumeName is the name of the custom ca volume and volume mount
+	customCaVolumeName = "custom-ca-bundle"
+
+	// customCaPath is the path the ca bundle will be mounted into
+	customCaPath = "/etc/open-control-plane/custom-ca"
+
+	// CustomCABundleConfigMapName is the fixed name for the copied CA bundle ConfigMap on the MCP cluster.
+	CustomCABundleConfigMapName = "custom-ca-bundle"
 )
+
+// certDirectories contains a list of places where the default system certs are stored in addition to caBundleMountDir
+// from x509 go lib (https://github.com/golang/go/blob/015343854b5d9e2829481df30dbcae2ca6682d25/src/crypto/x509/root_linux.go)
+var certDirectories = []string{
+	"/etc/ssl/certs",
+	"/etc/pki/tls/certs",
+}
 
 // HelmValues define the helm values that are explicitly processed during reconciliation
 type HelmValues struct {
@@ -117,6 +135,81 @@ func AddAuthToHelmValues(values *apiextensionsv1.JSON, remoteCluster resources.M
 	if err != nil {
 		return nil, err
 	}
+	return &apiextensionsv1.JSON{Raw: out}, nil
+}
+
+func AddCAHelmValues(values *apiextensionsv1.JSON, configMap *corev1.ConfigMapKeySelector) (*apiextensionsv1.JSON, error) {
+	if configMap == nil {
+		return nil, errors.New("cannot add custom CA to Helm values: ConfigMapKeySelector is nil")
+	}
+
+	if configMap.Name == "" {
+		return nil, errors.New("cannot add custom CA to Helm values: caBundleRef.Name must be set")
+	}
+
+	if configMap.Key == "" {
+		return nil, errors.New("cannot add custom CA to Helm values: caBundleRef.Key must be set")
+	}
+
+	caVolume := corev1.Volume{
+		Name: customCaVolumeName,
+		VolumeSource: corev1.VolumeSource{
+			ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{
+					Name: CustomCABundleConfigMapName,
+				},
+				Items: []corev1.KeyToPath{
+					{
+						Key:  configMap.Key,
+						Path: configMap.Key,
+					},
+				},
+			},
+		},
+	}
+
+	caVolumeMount := corev1.VolumeMount{
+		Name:      customCaVolumeName,
+		ReadOnly:  true,
+		MountPath: customCaPath,
+	}
+
+	caEnvVar := corev1.EnvVar{
+		Name:  "SSL_CERT_DIR",
+		Value: strings.Join(append(certDirectories, customCaPath), ":"),
+	}
+
+	root, err := unmarshalRoot(values)
+	if err != nil {
+		return nil, err
+	}
+
+	var extraVolumes []corev1.Volume
+	if err := unmarshalKey(root, "extraVolumes", &extraVolumes); err != nil {
+		return nil, fmt.Errorf("extraVolumes: %w", err)
+	}
+	extraVolumes = upsertVolume(extraVolumes, caVolume)
+	if root["extraVolumes"], err = json.Marshal(extraVolumes); err != nil {
+		return nil, err
+	}
+
+	// init container overrides
+	root["init"], err = patchContainerSection(root["init"], caVolumeMount, caEnvVar)
+	if err != nil {
+		return nil, fmt.Errorf("init: %w", err)
+	}
+
+	// manager container overrides
+	root["manager"], err = patchContainerSection(root["manager"], caVolumeMount, caEnvVar)
+	if err != nil {
+		return nil, fmt.Errorf("manager: %w", err)
+	}
+
+	out, err := json.Marshal(root)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal helm values: %w", err)
+	}
+
 	return &apiextensionsv1.JSON{Raw: out}, nil
 }
 

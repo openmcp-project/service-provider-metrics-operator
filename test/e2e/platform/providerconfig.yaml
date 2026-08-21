@@ -4,6 +4,9 @@ metadata:
   name: metricsoperator
 spec:
   pollInterval: 1m
+  caBundleRef:
+    name: ca-bundle
+    key: ca.crt
   versions:
     - version: "v1.1.0"
       chartVersion: "v1.1.0"
