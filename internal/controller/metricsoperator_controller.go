@@ -271,7 +271,7 @@ func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj
 	if pc.Spec.CABundleRef != nil {
 		configMapsToKeep = append(configMapsToKeep, corev1.LocalObjectReference{Name: helm.CustomCABundleConfigMapName})
 	}
-	controlPlaneConfigMapCleaner := configmap.NewConfigMapCleaner(workloadCluster, tenantNamespace, configMapsToKeep)
+	controlPlaneConfigMapCleaner := configmap.NewConfigMapCleaner(workloadCluster, instance.Namespace(obj), configMapsToKeep)
 	mgr.AddCleaner(controlPlaneConfigMapCleaner)
 
 	return mgr, nil
