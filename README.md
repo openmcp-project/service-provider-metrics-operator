@@ -43,6 +43,7 @@ flowchart LR
     subgraph NS[namespace per tenant]
       wlmoctrl[Metrics Operator Controllers]
       imgsec([image-pull-secret])
+      caconfigmap([custom-ca-configmap])
     end
   end
 
@@ -51,6 +52,7 @@ flowchart LR
   spmo -- creates --> helmrel
   spmo -- copies --> chartsec
   spmo -- copies --> imgsec
+  spmo -- copies --> caconfigmap
   helmrel -- installs --> wlmoctrl
   wlmoctrl -- installs --> crds
   wlmoctrl -- manages --> metrics
