@@ -176,7 +176,7 @@ func TestServiceProvider(t *testing.T) {
 					Items: []corev1.Secret{*imagePullSecret},
 				}
 				if err := wait.For(conditions.New(workloadConfig.Client().Resources()).ResourcesFound(list), wait.WithTimeout(2*time.Minute)); err != nil {
-					t.Errorf("image pull secret not found on workload cluster: %v", err)
+					t.Errorf("image pull secret not found in namespace %s: %v", workloadNamespace, err)
 				}
 				return ctx
 			},
