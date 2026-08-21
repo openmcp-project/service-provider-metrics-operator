@@ -340,6 +340,10 @@ func TestServiceProvider(t *testing.T) {
 			}
 
 			onboardingConfig, err := clusterutils.OnboardingConfig()
+			if err != nil {
+				t.Error(err)
+				return ctx
+			}
 			apiv1alpha1.AddToScheme(onboardingConfig.GetClient().Resources().GetScheme())
 			if err != nil {
 				t.Error(err)
