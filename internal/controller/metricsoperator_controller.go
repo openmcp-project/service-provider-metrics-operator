@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -45,6 +46,7 @@ import (
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/instance"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/objectutils"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/resources"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/secret"
 )
 
 const conditionReasonError = "ReconcileError"
@@ -186,20 +188,57 @@ func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj
 	}
 	authz.Configure(cpCluster, cpServiceAccount)
 
+	// Sync image pull secrets from platform cluster to workload
+	secret.ManagePullSecrets(workloadCluster, helmValues.Global.ImagePullSecrets, secret.SecretCopyConfig{
+		SourceClient:    r.PlatformCluster.Client(),
+		SourceNamespace: r.PodNamespace,
+		TargetNamespace: instance.Namespace(obj),
+	})
+
+	// Sync chart pull secret within platform cluster from pod namespace to tenant namespace
+	var prefixedChartPullSecret string
+	if moVersion.ChartPullSecret != "" {
+		prefixedChartPullSecret, err = secret.PrefixSecretName(moVersion.ChartPullSecret)
+		if err != nil {
+			return nil, fmt.Errorf("error generating secret name: %w", err)
+		}
+		secret.ManagePullSecrets(platformCluster, []corev1.LocalObjectReference{
+			{Name: moVersion.ChartPullSecret},
+		}, secret.SecretCopyConfig{
+			SourceClient:    r.PlatformCluster.Client(),
+			SourceNamespace: r.PodNamespace,
+			TargetNamespace: tenantNamespace,
+			TargetName:      prefixedChartPullSecret,
+		})
+	}
+
 	flux.ManageFluxResources(flux.ManageFluxResourcesParams{
-		Cluster:           platformCluster,
-		CPNamespace:       metricsNamespace,
-		WorkloadNamespace: instance.Namespace(obj),
-		Obj:               obj,
-		Interval:          pc.PollInterval(),
-		ClusterContext:    clusters,
-		RequestedVersion:  moVersion,
+		Cluster:             platformCluster,
+		CPNamespace:         metricsNamespace,
+		WorkloadNamespace:   instance.Namespace(obj),
+		ChartPullSecretName: prefixedChartPullSecret,
+		Obj:                 obj,
+		Interval:            pc.PollInterval(),
+		ClusterContext:      clusters,
+		RequestedVersion:    moVersion,
 	})
 
 	mgr := resources.NewManager()
 	mgr.AddCluster(cpCluster)
 	mgr.AddCluster(workloadCluster)
 	mgr.AddCluster(platformCluster)
+
+	platformCleaner := secret.NewSecretCleaner(platformCluster, tenantNamespace, []corev1.LocalObjectReference{
+		{
+			Name: prefixedChartPullSecret,
+		},
+	})
+	mgr.AddCleaner(platformCleaner)
+
+	// create cleaner to remove orphaned pull secret copies from workload cluster
+	secretsToKeep := append(slices.Clone(helmValues.Global.ImagePullSecrets), corev1.LocalObjectReference{Name: cpServiceAccount.KubeAPIAccess()})
+	workloadSecretCleaner := secret.NewSecretCleaner(workloadCluster, instance.Namespace(obj), secretsToKeep)
+	mgr.AddCleaner(workloadSecretCleaner)
 
 	return mgr, nil
 }
