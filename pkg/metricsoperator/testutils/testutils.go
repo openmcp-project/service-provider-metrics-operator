@@ -9,6 +9,7 @@ import (
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -19,8 +20,8 @@ import (
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/resources"
 )
 
-// CreateFakeClusterWithClient sets up a cluster with a fake client
-func CreateFakeClusterWithClient(t *testing.T, id string, clusterObjects ...client.Object) *clusters.Cluster {
+// CreateTestClusterWithClient sets up a cluster with a fake client
+func CreateTestClusterWithClient(t *testing.T, id string, clusterObjects ...client.Object) *clusters.Cluster {
 	t.Helper()
 	scheme := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(scheme)
@@ -67,4 +68,19 @@ type ListErrorClient struct {
 
 func (l ListErrorClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
 	return errors.New("list failed")
+}
+
+type DeleteErrorClient struct {
+	client.Client
+	FakeSecret corev1.Secret
+}
+
+func (d DeleteErrorClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	seclist := list.(*corev1.SecretList)
+	seclist.Items = []corev1.Secret{d.FakeSecret}
+	return nil
+}
+
+func (d DeleteErrorClient) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
+	return errors.New("delete failed")
 }
