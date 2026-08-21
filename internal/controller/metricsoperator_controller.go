@@ -132,6 +132,9 @@ func userErrorMessage(err error) string {
 	if errors.Is(err, ErrManagedResources) {
 		errorMessages = append(errorMessages, ErrManagedResources.Error())
 	}
+	if errors.Is(err, secret.ErrSecretCleanup) {
+		errorMessages = append(errorMessages, secret.ErrSecretCleanup.Error())
+	}
 	if len(errorMessages) == 0 {
 		return err.Error()
 	}
