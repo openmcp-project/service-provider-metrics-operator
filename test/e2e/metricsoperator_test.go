@@ -13,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/e2e-framework/klient/wait"
 	"sigs.k8s.io/e2e-framework/klient/wait/conditions"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
@@ -28,6 +29,8 @@ import (
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/flux"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/helm"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/instance"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/meta"
+	klientresources "sigs.k8s.io/e2e-framework/klient/k8s/resources"
 )
 
 var testCP = ""
@@ -290,6 +293,90 @@ func TestServiceProvider(t *testing.T) {
 			if err := wait.For(conditions.New(workloadConfig.Client().Resources()).ResourcesFound(list), wait.WithTimeout(2*time.Minute)); err != nil {
 				t.Errorf("image pull secret not found on workload: %v", err)
 				return ctx
+			}
+			return ctx
+		}).
+		Assess("provider config update drops pull secrets", func(ctx context.Context, t *testing.T, c *envconf.Config) context.Context {
+			platformConfig, err := clusterutils.ConfigByPrefix("platform", corev1.NamespaceDefault)
+			if err != nil {
+				t.Errorf("failed to get platform cluster config: %v", err)
+				return ctx
+			}
+			if err := apiv1alpha1.AddToScheme(platformConfig.Client().Resources().GetScheme()); err != nil {
+				t.Errorf("failed to add api types to client scheme: %s", err)
+				return ctx
+			}
+			providerConfig := &apiv1alpha1.ProviderConfig{}
+			if err := platformConfig.Client().Resources().Get(ctx, "metricsoperator", "openmcp-system", providerConfig); err != nil {
+				t.Errorf("failed to get provider config: %v", err)
+				return ctx
+			}
+			providerConfig.Spec.Versions[0].ChartPullSecret = ""
+			providerConfig.Spec.Versions[0].HelmValues = nil
+			if err := platformConfig.Client().Resources().Update(ctx, providerConfig); err != nil {
+				t.Errorf("failed to update provider config: %v", err)
+			}
+			// verify service stays healthy
+			onboardingConfig, err := clusterutils.OnboardingConfig()
+			if err != nil {
+				t.Error(err)
+				return ctx
+			}
+			apiv1alpha1.AddToScheme(onboardingConfig.GetClient().Resources().GetScheme())
+			mo := &apiv1alpha1.MetricsOperator{}
+			mo.SetName(testCP)
+			mo.SetNamespace(corev1.NamespaceDefault)
+			if err := wait.For(openmcpconditions.Match(mo, onboardingConfig, "Ready", corev1.ConditionTrue), wait.WithTimeout(2*time.Minute)); err != nil {
+				t.Errorf("MetricsOperator not ready after provider config update: %v", err)
+			}
+			return ctx
+		}).
+		Assess("platform chart pull secret deleted", func(ctx context.Context, t *testing.T, c *envconf.Config) context.Context {
+			platformConfig, err := clusterutils.ConfigByPrefix("platform", corev1.NamespaceDefault)
+			if err != nil {
+				t.Errorf("failed to get platform cluster config: %v", err)
+				return ctx
+			}
+			tenantNamespace, err := libutils.StableMCPNamespace(testCP, "default")
+			if err != nil {
+				t.Errorf("failed to get tenant namespace: %v", err)
+				return ctx
+			}
+			spMoSecrets := &corev1.SecretList{}
+			if err := wait.For(conditions.New(platformConfig.Client().Resources().WithNamespace(tenantNamespace)).
+				ResourceListN(spMoSecrets, 0, klientresources.WithLabelSelector(
+					labels.FormatLabels(map[string]string{meta.LabelManagedBy: meta.LabelManagedByValue}))),
+				wait.WithTimeout(2*time.Minute)); err != nil {
+				t.Errorf("orphaned chart pull secret is not deleted: %v", err)
+			}
+			return ctx
+		}).
+		Assess("workload image pull secrets deleted", func(ctx context.Context, t *testing.T, c *envconf.Config) context.Context {
+			workloadConfig, err := clusterutils.ConfigByPrefix("workload", corev1.NamespaceDefault)
+			if err != nil {
+				t.Error(err)
+				return ctx
+			}
+			onboardingConfig, err := clusterutils.OnboardingConfig()
+			if err != nil {
+				t.Error(err)
+				return ctx
+			}
+			if err := apiv1alpha1.AddToScheme(onboardingConfig.Client().Resources().GetScheme()); err != nil {
+				t.Errorf("failed to add scheme: %v", err)
+				return ctx
+			}
+			obj := &apiv1alpha1.MetricsOperator{}
+			if err := onboardingConfig.Client().Resources().Get(ctx, testCP, corev1.NamespaceDefault, obj); err != nil {
+				t.Errorf("failed to get MetricsOperator: %v", err)
+				return ctx
+			}
+			secrets := &corev1.SecretList{}
+			if err := wait.For(conditions.New(workloadConfig.Client().Resources().WithNamespace(instance.Namespace(obj))).
+				ResourceListN(secrets, 0, klientresources.WithLabelSelector(
+					labels.FormatLabels(map[string]string{meta.LabelManagedBy: meta.LabelManagedByValue}))),
+				wait.WithTimeout(2*time.Minute)); err != nil {
+				t.Errorf("orphaned image pull secret is not deleted: %v", err)
 			}
 			return ctx
 		}).
