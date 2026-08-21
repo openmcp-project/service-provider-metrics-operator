@@ -2,7 +2,6 @@ package secret
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -185,8 +184,8 @@ func Test_secretCleaner_Cleanup(t *testing.T) {
 		},
 		{
 			name: "error is returned when delete fails",
-			cluster: testutils.CreateFakeCluster(deleteErrorClient{
-				fakeSecret: *testSecret("a", "test-ns", true),
+			cluster: testutils.CreateFakeCluster(testutils.DeleteErrorClient{
+				FakeSecret: *testSecret("a", "test-ns", true),
 			}),
 			targetNamespace: "test-ns",
 			secretsToKeep:   []corev1.LocalObjectReference{},
@@ -290,19 +289,4 @@ func TestSecretStatus(t *testing.T) {
 			assert.Equal(t, tt.rl, status.Location)
 		})
 	}
-}
-
-type deleteErrorClient struct {
-	client.Client
-	fakeSecret corev1.Secret
-}
-
-func (d deleteErrorClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
-	seclist := list.(*corev1.SecretList)
-	seclist.Items = []corev1.Secret{d.fakeSecret}
-	return nil
-}
-
-func (d deleteErrorClient) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
-	return errors.New("delete failed")
 }
