@@ -20,8 +20,11 @@ flowchart LR
 
   subgraph PC[Platform Cluster]
     spmo[Service Provider Metrics Operator]
-    ocirepo([OCIRepository])
-    helmrel([HelmRelease])
+    subgraph TN[Tenant Namespace]
+      ocirepo([OCIRepository])
+      helmrel([HelmRelease])
+      chartsec([chart-pull-secret])
+    end
   end
 
   subgraph OC[Onboarding Cluster]
@@ -39,12 +42,15 @@ flowchart LR
   subgraph wl[Workload Cluster]
     subgraph NS[namespace per tenant]
       wlmoctrl[Metrics Operator Controllers]
+      imgsec([image-pull-secret])
     end
   end
 
   spmo -- reconciles --> moapi
   spmo -- creates --> ocirepo
   spmo -- creates --> helmrel
+  spmo -- copies --> chartsec
+  spmo -- copies --> imgsec
   helmrel -- installs --> wlmoctrl
   wlmoctrl -- installs --> crds
   wlmoctrl -- manages --> metrics
