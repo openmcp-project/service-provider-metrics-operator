@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ca-bundle
+  namespace: openmcp-system
+data:
+  # dummy value for testing
+  ca.crt: |
+    -----BEGIN CERTIFICATE-----
+    MIIBsjCCAVigAwIBAgIUDummyCertificateForE2ETestsOnlywCgYIKoZIzj0EAwIw
+    EzERMA8GA1UEAwwIdGVzdC1jYTAeFw0yNjAxMDEwMDAwMDBaFw0zNjAxMDEwMDAw
+    MDBaMBMxETAPBgNVBAMMCHRlc3QtY2EwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNC
+    AASxDummyCertDataOnlyForE2EFlowValidationDoNotUseInProd2Yxk7T7x7C1q5
+    i8E2zX2S9qQwCgYIKoZIzj0EAwIDSAAwRQIhANdummyW9J6g4QYjv2Q6u8X9q8lQ
+    3S7V8E5U2bY6uY6QhAiBiDummylX8Yv3n9vQj8m8xjz0H2xB3g9C2u8vA==
+    -----END CERTIFICATE-----
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ca-bundle-update
+  namespace: openmcp-system
+data:
+  # dummy value for testing
+  ca.crt: |
+    -----BEGIN CERTIFICATE-----
+    MIIBsjCCAVigAwIBAgIUUpdatedDummyCertificateForE2ETestsOnlywCgYIKoZIzj0EAwIw
+    EzERMA8GA1UEAwwIdGVzdC1jYTAeFw0yNjAxMDEwMDAwMDBaFw0zNjAxMDEwMDAw
+    MDBaMBMxETAPBgNVBAMMCHRlc3QtY2EwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNC
+    AASxDummyCertDataOnlyForE2EFlowValidationDoNotUseInProd2Yxk7T7x7C1q5
+    i8E2zX2S9qQwCgYIKoZIzj0EAwIDSAAwRQIhANdummyW9J6g4QYjv2Q6u8X9q8lQ
+    3S7V8E5U2bY6uY6QhAiBiDummylX8Yv3n9vQj8m8xjz0H2xB3g9C2u8vA==
+    -----END CERTIFICATE-----
