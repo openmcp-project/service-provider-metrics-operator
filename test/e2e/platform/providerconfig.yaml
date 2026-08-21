@@ -4,6 +4,9 @@ metadata:
   name: metricsoperator
 spec:
   pollInterval: 1m
+  caBundleRef:
+    name: ca-bundle
+    key: ca.crt
   versions:
       # renovate: datasource=docker depName=ghcr.io/openmcp-project/charts/metrics-operator
     - version: "v1.1.0"

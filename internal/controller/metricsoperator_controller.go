@@ -40,6 +40,7 @@ import (
 	apiv1alpha1 "github.com/openmcp-project/service-provider-metrics-operator/api/v1alpha1"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/authn"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/authz"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/configmap"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/cpresources"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/flux"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/helm"
@@ -135,12 +136,16 @@ func userErrorMessage(err error) string {
 	if errors.Is(err, secret.ErrSecretCleanup) {
 		errorMessages = append(errorMessages, secret.ErrSecretCleanup.Error())
 	}
+	if errors.Is(err, configmap.ErrConfigMapCleanup) {
+		errorMessages = append(errorMessages, configmap.ErrConfigMapCleanup.Error())
+	}
 	if len(errorMessages) == 0 {
 		return err.Error()
 	}
 	return strings.Join(errorMessages, "; ")
 }
 
+//nolint:gocyclo
 func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj *apiv1alpha1.MetricsOperator, pc *apiv1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (resources.Manager, error) {
 	tenantNamespace, err := libutils.StableMCPNamespace(obj.Name, obj.Namespace)
 	if err != nil {
@@ -215,6 +220,23 @@ func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj
 		})
 	}
 
+	if pc.Spec.CABundleRef != nil {
+		// add custom ca volume, volumeMount and envVar to helm values
+		moVersion.HelmValues, err = helm.AddCAHelmValues(moVersion.HelmValues, pc.Spec.CABundleRef)
+		if err != nil {
+			return nil, fmt.Errorf("failed to add ca volume to helm values: %w", err)
+		}
+
+		// Sync ca configmap from platform cluster to MCP
+		configmap.ManageCaConfigMap(workloadCluster, pc.Spec.CABundleRef.LocalObjectReference, configmap.ConfigMapCopyConfig{
+			SourceClient:    r.PlatformCluster.Client(),
+			SourceNamespace: r.PodNamespace,
+			TargetNamespace: instance.Namespace(obj),
+			TargetName:      helm.CustomCABundleConfigMapName,
+		})
+
+	}
+
 	flux.ManageFluxResources(flux.ManageFluxResourcesParams{
 		Cluster:             platformCluster,
 		CPNamespace:         metricsNamespace,
@@ -243,6 +265,14 @@ func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj
 	secretsToKeep := append(slices.Clone(helmValues.ImagePullSecrets), corev1.LocalObjectReference{Name: cpServiceAccount.KubeAPIAccess()})
 	workloadSecretCleaner := secret.NewSecretCleaner(workloadCluster, instance.Namespace(obj), secretsToKeep)
 	mgr.AddCleaner(workloadSecretCleaner)
+
+	// create cleaner to remove orphaned configmaps from workload cluster
+	configMapsToKeep := []corev1.LocalObjectReference{}
+	if pc.Spec.CABundleRef != nil {
+		configMapsToKeep = append(configMapsToKeep, corev1.LocalObjectReference{Name: helm.CustomCABundleConfigMapName})
+	}
+	controlPlaneConfigMapCleaner := configmap.NewConfigMapCleaner(workloadCluster, tenantNamespace, configMapsToKeep)
+	mgr.AddCleaner(controlPlaneConfigMapCleaner)
 
 	return mgr, nil
 }
