@@ -113,7 +113,7 @@ type secretCleaner struct {
 }
 
 // NewSecretCleaner removes redundant pull secrets in the given target namespace
-// by removing any secret labeled as managed by sp-mo that is not in secretsToKeep.
+// by removing any secret labeled as managed by service-provider-metrics-operator that is not in secretsToKeep.
 func NewSecretCleaner(cluster resources.ManagedCluster, namespace string, secretsToKeep []corev1.LocalObjectReference) resources.OrphanCleaner {
 	return &secretCleaner{
 		cluster:       cluster,
