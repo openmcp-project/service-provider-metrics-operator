@@ -231,6 +231,7 @@ func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj
 	mgr.AddCluster(workloadCluster)
 	mgr.AddCluster(platformCluster)
 
+	// create cleaner to remove orphaned pull secret copies from platform tenant namespace
 	platformCleaner := secret.NewSecretCleaner(platformCluster, tenantNamespace, []corev1.LocalObjectReference{
 		{
 			Name: prefixedChartPullSecret,
