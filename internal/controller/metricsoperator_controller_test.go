@@ -164,7 +164,7 @@ func TestSelectVersion(t *testing.T) {
 	})
 }
 
-func TestManagePullSecrets_SyncsToWorkloadCluster(t *testing.T) {
+func TestManagePullSecrets_SyncsImagePullSecretToWorkloadCluster(t *testing.T) {
 	sourceSecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-pull-secret", Namespace: "openmcp-system"},
 		Data:       map[string][]byte{".dockerconfigjson": []byte(`{"auths":{}}`)},
@@ -215,7 +215,7 @@ func TestManagePullSecrets_SyncsToWorkloadCluster(t *testing.T) {
 	assert.Equal(t, sourceSecret.Data, targetSecret.Data)
 }
 
-func TestManagePullSecrets_SyncsChartSecretToPlatformCluster(t *testing.T) {
+func TestManagePullSecrets_SyncsChartPullSecretToPlatformCluster(t *testing.T) {
 	sourceSecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: "registry-credentials", Namespace: "openmcp-system"},
 		Data:       map[string][]byte{".dockerconfigjson": []byte(`{"auths":{}}`)},
