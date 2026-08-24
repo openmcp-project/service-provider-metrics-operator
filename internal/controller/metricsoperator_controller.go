@@ -227,7 +227,7 @@ func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj
 			return nil, fmt.Errorf("failed to add ca volume to helm values: %w", err)
 		}
 
-		// Sync ca configmap from platform cluster to MCP
+		// Sync ca configmap from platform cluster to workload cluster
 		configmap.ManageCaConfigMap(workloadCluster, pc.Spec.CABundleRef.LocalObjectReference, configmap.ConfigMapCopyConfig{
 			SourceClient:    r.PlatformCluster.Client(),
 			SourceNamespace: r.PodNamespace,
