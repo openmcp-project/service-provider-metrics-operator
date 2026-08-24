@@ -11,7 +11,7 @@ import (
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -24,12 +24,12 @@ import (
 func CreateTestClusterWithClient(t *testing.T, id string, clusterObjects ...client.Object) *clusters.Cluster {
 	t.Helper()
 	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	_ = apiextv1.AddToScheme(scheme)
-	_ = v1alpha1.AddToScheme(scheme)
-	_ = clustersv1alpha1.AddToScheme(scheme)
-	_ = helmv2.AddToScheme(scheme)
-	_ = sourcev1.AddToScheme(scheme)
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(apiextv1.AddToScheme(scheme))
+	utilruntime.Must(v1alpha1.AddToScheme(scheme))
+	utilruntime.Must(clustersv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(helmv2.AddToScheme(scheme))
+	utilruntime.Must(sourcev1.AddToScheme(scheme))
 
 	// init cluster with objects
 	fakeClient := fake.NewClientBuilder().WithObjects(clusterObjects...).WithScheme(scheme).Build()
@@ -58,7 +58,7 @@ func CreateFakeCluster(client client.Client) resources.ManagedCluster {
 // CreateFakeClient creates a fake client
 func CreateFakeClient(clusterObjects []client.Object) client.Client {
 	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	return fake.NewClientBuilder().WithObjects(clusterObjects...).WithScheme(scheme).Build()
 }
 
