@@ -5,7 +5,9 @@ metadata:
 spec:
   pollInterval: 1m
   versions:
+      # renovate: datasource=docker depName=ghcr.io/openmcp-project/charts/metrics-operator
     - version: "v1.1.0"
+      # renovate: datasource=docker depName=ghcr.io/openmcp-project/charts/metrics-operator
       chartVersion: "v1.1.0"
       chartURL: oci://ghcr.io/openmcp-project/charts/metrics-operator
       chartPullSecret: registry-credentials
@@ -15,4 +17,5 @@ spec:
             - name: registry-credentials
         image:
           repository: "ghcr.io/openmcp-project/images/metrics-operator"
+          # renovate: datasource=docker depName=ghcr.io/openmcp-project/images/metrics-operator
           tag: "v1.1.0"
