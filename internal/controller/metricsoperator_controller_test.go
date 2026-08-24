@@ -8,13 +8,18 @@ import (
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
 	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider"
 	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider/clusteraccess"
+	libutils "github.com/openmcp-project/openmcp-operator/lib/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/meta/testrestmapper"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -23,6 +28,8 @@ import (
 	apiv1alpha1 "github.com/openmcp-project/service-provider-metrics-operator/api/v1alpha1"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/cpresources"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/instance"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/secret"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/testutils"
 )
 
 // onboardingScheme includes MetricsOperator so the fake onboarding client accepts it.
@@ -155,4 +162,110 @@ func TestSelectVersion(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "v9.9.9")
 	})
+}
+
+func TestManagePullSecrets_SyncsToWorkloadCluster(t *testing.T) {
+	sourceSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-pull-secret", Namespace: "openmcp-system"},
+		Data:       map[string][]byte{".dockerconfigjson": []byte(`{"auths":{}}`)},
+		Type:       corev1.SecretTypeDockerConfigJson,
+	}
+
+	obj := moWithInstanceID()
+	obj.Spec.Version = "v1.0.0"
+
+	platformCluster := testutils.CreateTestClusterWithClient(t, "platform", sourceSecret).WithRESTConfig(&rest.Config{Host: "https://platform:6443"})
+	workloadCluster := testutils.CreateTestClusterWithClient(t, "workload").WithRESTConfig(&rest.Config{Host: "https://workload:6443"})
+	cpCluster := testutils.CreateTestClusterWithClient(t, "cp").WithRESTConfig(&rest.Config{Host: "https://cp:6443"})
+
+	r := &MetricsOperatorReconciler{
+		OnboardingCluster: onboardingClient(),
+		PlatformCluster:   platformCluster,
+		PodNamespace:      "openmcp-system",
+	}
+
+	helmValuesJSON := `{"global":{"imagePullSecrets":[{"name":"test-pull-secret"}]}}`
+	pc := &apiv1alpha1.ProviderConfig{
+		Spec: apiv1alpha1.ProviderConfigSpec{
+			Versions: []apiv1alpha1.MetricsOperatorVersion{
+				{
+					Version:      "v1.0.0",
+					ChartVersion: "v1.0.0",
+					ChartURL:     new("oci://example.com/chart"),
+					HelmValues:   &apiextensionsv1.JSON{Raw: []byte(helmValuesJSON)},
+				},
+			},
+		},
+	}
+
+	mgr, err := r.createObjectManager(context.Background(), obj, pc, clusteraccess.ClusterContext{
+		WorkloadCluster: workloadCluster,
+		MCPCluster:      cpCluster,
+	})
+	require.NoError(t, err)
+	_, err = mgr.Apply(context.Background())
+	require.NoError(t, err)
+
+	targetSecret := &corev1.Secret{}
+	err = workloadCluster.Client().Get(context.Background(), client.ObjectKey{
+		Name:      "test-pull-secret",
+		Namespace: instance.Namespace(obj),
+	}, targetSecret)
+	require.NoError(t, err)
+	assert.Equal(t, sourceSecret.Data, targetSecret.Data)
+}
+
+func TestManagePullSecrets_SyncsChartSecretToPlatformCluster(t *testing.T) {
+	sourceSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "registry-credentials", Namespace: "openmcp-system"},
+		Data:       map[string][]byte{".dockerconfigjson": []byte(`{"auths":{}}`)},
+		Type:       corev1.SecretTypeDockerConfigJson,
+	}
+
+	obj := moWithInstanceID()
+	obj.Spec.Version = "v1.0.0"
+
+	platformCluster := testutils.CreateTestClusterWithClient(t, "platform", sourceSecret).WithRESTConfig(&rest.Config{Host: "https://platform:6443"})
+	workloadCluster := testutils.CreateTestClusterWithClient(t, "workload").WithRESTConfig(&rest.Config{Host: "https://workload:6443"})
+	cpCluster := testutils.CreateTestClusterWithClient(t, "cp").WithRESTConfig(&rest.Config{Host: "https://cp:6443"})
+
+	r := &MetricsOperatorReconciler{
+		OnboardingCluster: onboardingClient(),
+		PlatformCluster:   platformCluster,
+		PodNamespace:      "openmcp-system",
+	}
+
+	pc := &apiv1alpha1.ProviderConfig{
+		Spec: apiv1alpha1.ProviderConfigSpec{
+			Versions: []apiv1alpha1.MetricsOperatorVersion{
+				{
+					Version:         "v1.0.0",
+					ChartVersion:    "v1.0.0",
+					ChartURL:        new("oci://example.com/chart"),
+					ChartPullSecret: "registry-credentials",
+				},
+			},
+		},
+	}
+
+	mgr, err := r.createObjectManager(context.Background(), obj, pc, clusteraccess.ClusterContext{
+		WorkloadCluster: workloadCluster,
+		MCPCluster:      cpCluster,
+	})
+	require.NoError(t, err)
+	_, err = mgr.Apply(context.Background())
+	require.NoError(t, err)
+
+	prefixedName, err := secret.PrefixSecretName("registry-credentials")
+	require.NoError(t, err)
+	tenantNamespace, err := libutils.StableMCPNamespace(obj.Name, obj.Namespace)
+	require.NoError(t, err)
+
+	targetSecret := &corev1.Secret{}
+	err = platformCluster.Client().Get(context.Background(), client.ObjectKey{
+		Name:      prefixedName,
+		Namespace: tenantNamespace,
+	}, targetSecret)
+	require.NoError(t, err)
+	assert.Equal(t, sourceSecret.Data, targetSecret.Data)
 }
