@@ -3,4 +3,5 @@ kind: MetricsOperator
 metadata:
   name: test-mcp
 spec:
-  version: "v0.13.0"
+  # renovate: datasource=docker depName=ghcr.io/openmcp-project/charts/metrics-operator
+  version: "v1.1.0"
