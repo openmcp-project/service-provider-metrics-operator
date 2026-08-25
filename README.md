@@ -178,7 +178,7 @@ metadata:
 spec:
   # Optional: Reconciliation interval
   pollInterval: "1m"
-  # Optional: ConfigMapKeySelector for a custom CA bundle (configmap will be copied to the Workload Cluster)
+  # Optional: ConfigMapKeySelector for a custom CA bundle (configmap will be copied to the Workload Cluster under the fixed name 'custom-ca-bundle')
   caBundleRef:
     name: "custom-ca-bundle"
     key: "ca-bundle.crt"
