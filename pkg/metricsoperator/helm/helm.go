@@ -16,13 +16,8 @@ const (
 
 // HelmValues define the helm values that are explicitly processed during reconciliation
 type HelmValues struct {
-	NamespaceOverride string `json:"namespaceOverride,omitempty"`
-	Global            Global `json:"global,omitempty"`
-}
-
-// Global define the global settings that are explicitly process during reconciliation
-type Global struct {
-	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
+	NamespaceOverride string                        `json:"namespaceOverride,omitempty"`
+	ImagePullSecrets  []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
 }
 
 // ExtractHelmValues extract helm values required for processing
