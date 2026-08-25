@@ -34,8 +34,9 @@ import (
 )
 
 const (
-	version1 = "v1.0.0"
-	version2 = "v2.0.0"
+	version1  = "v1.0.0"
+	version2  = "v2.0.0"
+	openmcpNS = "openmcp-system"
 )
 
 // onboardingScheme includes MetricsOperator so the fake onboarding client accepts it.
@@ -172,7 +173,7 @@ func TestSelectVersion(t *testing.T) {
 
 func TestManagePullSecrets_SyncsImagePullSecretToWorkloadCluster(t *testing.T) {
 	sourceSecret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pull-secret", Namespace: "openmcp-system"},
+		ObjectMeta: metav1.ObjectMeta{Name: "test-pull-secret", Namespace: openmcpNS},
 		Data:       map[string][]byte{".dockerconfigjson": []byte(`{"auths":{}}`)},
 		Type:       corev1.SecretTypeDockerConfigJson,
 	}
@@ -187,7 +188,7 @@ func TestManagePullSecrets_SyncsImagePullSecretToWorkloadCluster(t *testing.T) {
 	r := &MetricsOperatorReconciler{
 		OnboardingCluster: onboardingClient(),
 		PlatformCluster:   platformCluster,
-		PodNamespace:      "openmcp-system",
+		PodNamespace:      openmcpNS,
 	}
 
 	helmValuesJSON := `{"global":{"imagePullSecrets":[{"name":"test-pull-secret"}]}}`
@@ -223,7 +224,7 @@ func TestManagePullSecrets_SyncsImagePullSecretToWorkloadCluster(t *testing.T) {
 
 func TestManagePullSecrets_SyncsChartPullSecretToPlatformCluster(t *testing.T) {
 	sourceSecret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "registry-credentials", Namespace: "openmcp-system"},
+		ObjectMeta: metav1.ObjectMeta{Name: "registry-credentials", Namespace: openmcpNS},
 		Data:       map[string][]byte{".dockerconfigjson": []byte(`{"auths":{}}`)},
 		Type:       corev1.SecretTypeDockerConfigJson,
 	}
@@ -238,7 +239,7 @@ func TestManagePullSecrets_SyncsChartPullSecretToPlatformCluster(t *testing.T) {
 	r := &MetricsOperatorReconciler{
 		OnboardingCluster: onboardingClient(),
 		PlatformCluster:   platformCluster,
-		PodNamespace:      "openmcp-system",
+		PodNamespace:      openmcpNS,
 	}
 
 	pc := &apiv1alpha1.ProviderConfig{
@@ -278,7 +279,7 @@ func TestManagePullSecrets_SyncsChartPullSecretToPlatformCluster(t *testing.T) {
 
 func TestManageCaConfigMap_SyncsCaConfigMapToWorkloadCluster(t *testing.T) {
 	sourceConfigMap := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: "ca-bundle", Namespace: "openmcp-system"},
+		ObjectMeta: metav1.ObjectMeta{Name: "ca-bundle", Namespace: openmcpNS},
 		Data:       map[string]string{"ca.crt": "dummy-ca-cert"},
 	}
 
@@ -292,7 +293,7 @@ func TestManageCaConfigMap_SyncsCaConfigMapToWorkloadCluster(t *testing.T) {
 	r := &MetricsOperatorReconciler{
 		OnboardingCluster: onboardingClient(),
 		PlatformCluster:   platformCluster,
-		PodNamespace:      "openmcp-system",
+		PodNamespace:      openmcpNS,
 	}
 
 	pc := &apiv1alpha1.ProviderConfig{
