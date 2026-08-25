@@ -58,7 +58,17 @@ import (
 	"github.com/openmcp-project/service-provider-metrics-operator/api/crds"
 	metricsoperatorsv1alpha1 "github.com/openmcp-project/service-provider-metrics-operator/api/v1alpha1"
 	"github.com/openmcp-project/service-provider-metrics-operator/internal/controller"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/cpresources"
 	// +kubebuilder:scaffold:imports
+)
+
+const (
+	verbGet    = "get"
+	verbCreate = "create"
+	verbUpdate = "update"
+	verbPatch  = "patch"
+	verbDelete = "delete"
+	verbList   = "list"
 )
 
 var (
@@ -319,24 +329,44 @@ func main() {
 		os.Exit(1)
 	}
 
-	// TODO: define minimum set of permission the service provider requires on the cp cluster
 	cpTokenAccessConfig := &clustersv1alpha1.TokenConfig{
 		Permissions: []clustersv1alpha1.PermissionsRequest{
 			{
-				// Create NS -> pkg/metricsoperator/authn/serviceaccount.go:299
 				Rules: []rbacv1.PolicyRule{
 					{
-						APIGroups: []string{"*"},
-						Resources: []string{"*"},
-						Verbs:     []string{"*"},
+						APIGroups: []string{""},
+						Resources: []string{"namespaces"},
+						Verbs:     []string{verbGet, verbCreate, verbUpdate, verbPatch, verbDelete},
+					},
+					{
+						APIGroups: []string{""},
+						Resources: []string{"serviceaccounts"},
+						Verbs:     []string{verbGet, verbCreate, verbUpdate, verbPatch, verbDelete},
+					},
+					{
+						APIGroups: []string{""},
+						Resources: []string{"serviceaccounts/token"},
+						Verbs:     []string{verbCreate},
+					},
+					{
+						APIGroups: []string{rbacv1.GroupName},
+						Resources: []string{"clusterroles", "clusterrolebindings"},
+						Verbs:     []string{verbGet, verbCreate, verbUpdate, verbPatch, verbDelete},
+					},
+					{
+						APIGroups: []string{cpresources.MetricsGroup},
+						Resources: []string{
+							"datasinks",
+							"federatedclusteraccesses",
+							"federatedmanagedmetrics",
+							"federatedmetrics",
+							"managedmetrics",
+							"metrics",
+							"remoteclusteraccesses",
+						},
+						Verbs: []string{verbList},
 					},
 				},
-			},
-		},
-		RoleRefs: []common.RoleRef{
-			{
-				Name: "cluster-admin",
-				Kind: "ClusterRole",
 			},
 		},
 	}
@@ -355,23 +385,21 @@ func main() {
 		WithScheme(cpScheme).
 		Build()
 
-	// TODO: define minimum set of permission the service provider requires on the workload cluster
 	workloadTokenAccessConfig := &clustersv1alpha1.TokenConfig{
 		Permissions: []clustersv1alpha1.PermissionsRequest{
 			{
 				Rules: []rbacv1.PolicyRule{
 					{
-						APIGroups: []string{"*"},
-						Resources: []string{"*"},
-						Verbs:     []string{"*"},
+						APIGroups: []string{""},
+						Resources: []string{"namespaces"},
+						Verbs:     []string{verbGet, verbCreate, verbUpdate, verbPatch, verbDelete},
+					},
+					{
+						APIGroups: []string{""},
+						Resources: []string{"secrets"},
+						Verbs:     []string{verbGet, verbList, verbCreate, verbUpdate, verbPatch, verbDelete},
 					},
 				},
-			},
-		},
-		RoleRefs: []common.RoleRef{
-			{
-				Name: "cluster-admin",
-				Kind: "ClusterRole",
 			},
 		},
 	}
