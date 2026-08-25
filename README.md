@@ -194,9 +194,8 @@ spec:
       # Optional: Custom Helm values
       helmValues:
         # Image pull secrets for private registries (will be copied to the Workload Cluster)
-        global:
-          imagePullSecrets:
-            - name: "image-registry-credentials"
+        imagePullSecrets:
+          - name: "image-registry-credentials"
         # Custom image
         image:
           repository: ghcr.io/openmcp-project/images/metrics-operator
