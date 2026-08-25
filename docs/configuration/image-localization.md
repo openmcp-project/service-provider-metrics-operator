@@ -139,7 +139,7 @@ Create the configmap in the service provider's namespace on the platform cluster
 ```shell
 kubectl create configmap custom-ca-bundle \
   --from-file=ca-bundle.crt=ca-bundle.crt \
-  --namespace=openmcp-system
+  --namespace <service-provider-namespace>
 ```
 
 ## How It Works
@@ -176,7 +176,7 @@ metadata:
   name: metricsoperator
 spec:
   caBundleRef:
-    name: "harbor-ca-bundle"
+    name: "harbor-ca-bundle"        # copied to the Workload Cluster under the fixed name 'custom-ca-bundle'
     key: "harbor-ca-bundle.crt"
   versions:
     - version: "v1.0.0"
@@ -215,11 +215,11 @@ skopeo copy \
 Verify secrets are copied to the correct namespaces:
 
 ```bash
-# Platform cluster - tenant namespace (chart pull secret)
+# Platform cluster
 kubectl get secrets -n mcp--<tenant-id> | grep chart
 
-# Workload cluster - tenant namespace (image pull secrets)
-kubectl get secrets -n mcp--<tenant-id> | grep image
+# Workload cluster
+kubectl get secrets -n metrics-operator-<instance-id> | grep image
 ```
 
 ### Check ConfigMap Copying
@@ -227,20 +227,20 @@ kubectl get secrets -n mcp--<tenant-id> | grep image
 Verify the CA configmap is copied to the Workload Cluster:
 
 ```bash
-# Workload cluster - tenant namespace
-kubectl get cm -n mcp--<tenant-id> | grep ca
+# Workload cluster
+kubectl get cm -n metrics-operator-<instance-id>| grep ca
 ```
 
 ### Check OCIRepository Secret Reference
 
 ```bash
-# Platform cluster - tenant namespace (chart pull secret)
+# Platform cluster
 kubectl get ocirepository metrics-operator -n mcp--<tenant-id> -o jsonpath='{.spec.secretRef}'
 ```
 
 ### Check HelmRelease Values
 
 ```bash
-# Platform cluster - tenant namespace (chart pull secret)
+# Platform cluster
 kubectl get helmrelease metrics-operator -n mcp--<tenant-id> -o jsonpath='{.spec.values}' | jq .
 ```
