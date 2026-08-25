@@ -198,10 +198,8 @@ func TestServiceProvider(t *testing.T) {
 			}
 			providerConfig.Spec.Versions[0].ChartPullSecret = "registry-credentials-update"
 			values := helm.HelmValues{
-				Global: helm.Global{
-					ImagePullSecrets: []corev1.LocalObjectReference{
-						{Name: "registry-credentials-update"},
-					},
+				ImagePullSecrets: []corev1.LocalObjectReference{
+					{Name: "registry-credentials-update"},
 				},
 			}
 			bytes, err := json.Marshal(values)

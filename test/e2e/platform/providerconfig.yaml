@@ -12,9 +12,8 @@ spec:
       chartURL: oci://ghcr.io/openmcp-project/charts/metrics-operator
       chartPullSecret: registry-credentials
       helmValues:
-        global:
-          imagePullSecrets:
-            - name: registry-credentials
+        imagePullSecrets:
+          - name: registry-credentials
         image:
           repository: "ghcr.io/openmcp-project/images/metrics-operator"
           # renovate: datasource=docker depName=ghcr.io/openmcp-project/images/metrics-operator
