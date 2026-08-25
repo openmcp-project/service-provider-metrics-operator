@@ -32,6 +32,11 @@ import (
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/testutils"
 )
 
+const (
+	version1 = "v1.0.0"
+	version2 = "v2.0.0"
+)
+
 // onboardingScheme includes MetricsOperator so the fake onboarding client accepts it.
 func onboardingScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
@@ -144,17 +149,17 @@ func TestSelectVersion(t *testing.T) {
 	pc := &apiv1alpha1.ProviderConfig{
 		Spec: apiv1alpha1.ProviderConfigSpec{
 			Versions: []apiv1alpha1.MetricsOperatorVersion{
-				{Version: "v1.0.0", ChartVersion: "1.0.0", ChartURL: new("oci://example.com/chart")},
-				{Version: "v1.1.0", ChartVersion: "1.1.0", ChartURL: new("oci://example.com/chart")},
+				{Version: version1, ChartVersion: version1, ChartURL: new("oci://example.com/chart")},
+				{Version: version2, ChartVersion: version2, ChartURL: new("oci://example.com/chart")},
 			},
 		},
 	}
 
 	t.Run("found", func(t *testing.T) {
-		v, err := selectMetricsOperatorVersion("v1.0.0", pc)
+		v, err := selectMetricsOperatorVersion(version1, pc)
 		require.NoError(t, err)
-		assert.Equal(t, "v1.0.0", v.Version)
-		assert.Equal(t, "1.0.0", v.ChartVersion)
+		assert.Equal(t, version1, v.Version)
+		assert.Equal(t, version1, v.ChartVersion)
 	})
 
 	t.Run("not found returns invalid user input error", func(t *testing.T) {
@@ -172,7 +177,7 @@ func TestManagePullSecrets_SyncsImagePullSecretToWorkloadCluster(t *testing.T) {
 	}
 
 	obj := moWithInstanceID()
-	obj.Spec.Version = "v1.0.0"
+	obj.Spec.Version = version1
 
 	platformCluster := testutils.CreateTestClusterWithClient(t, "platform", sourceSecret).WithRESTConfig(&rest.Config{Host: "https://platform:6443"})
 	workloadCluster := testutils.CreateTestClusterWithClient(t, "workload").WithRESTConfig(&rest.Config{Host: "https://workload:6443"})
@@ -189,8 +194,8 @@ func TestManagePullSecrets_SyncsImagePullSecretToWorkloadCluster(t *testing.T) {
 		Spec: apiv1alpha1.ProviderConfigSpec{
 			Versions: []apiv1alpha1.MetricsOperatorVersion{
 				{
-					Version:      "v1.0.0",
-					ChartVersion: "v1.0.0",
+					Version:      version1,
+					ChartVersion: version1,
 					ChartURL:     new("oci://example.com/chart"),
 					HelmValues:   &apiextensionsv1.JSON{Raw: []byte(helmValuesJSON)},
 				},
@@ -223,7 +228,7 @@ func TestManagePullSecrets_SyncsChartPullSecretToPlatformCluster(t *testing.T) {
 	}
 
 	obj := moWithInstanceID()
-	obj.Spec.Version = "v1.0.0"
+	obj.Spec.Version = version1
 
 	platformCluster := testutils.CreateTestClusterWithClient(t, "platform", sourceSecret).WithRESTConfig(&rest.Config{Host: "https://platform:6443"})
 	workloadCluster := testutils.CreateTestClusterWithClient(t, "workload").WithRESTConfig(&rest.Config{Host: "https://workload:6443"})
@@ -239,8 +244,8 @@ func TestManagePullSecrets_SyncsChartPullSecretToPlatformCluster(t *testing.T) {
 		Spec: apiv1alpha1.ProviderConfigSpec{
 			Versions: []apiv1alpha1.MetricsOperatorVersion{
 				{
-					Version:         "v1.0.0",
-					ChartVersion:    "v1.0.0",
+					Version:         version1,
+					ChartVersion:    version1,
 					ChartURL:        new("oci://example.com/chart"),
 					ChartPullSecret: "registry-credentials",
 				},
