@@ -192,7 +192,7 @@ func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj
 	authz.Configure(cpCluster, cpServiceAccount)
 
 	// Sync image pull secrets from platform cluster to workload
-	secret.ManagePullSecrets(workloadCluster, helmValues.Global.ImagePullSecrets, secret.SecretCopyConfig{
+	secret.ManagePullSecrets(workloadCluster, helmValues.ImagePullSecrets, secret.SecretCopyConfig{
 		SourceClient:    r.PlatformCluster.Client(),
 		SourceNamespace: r.PodNamespace,
 		TargetNamespace: instance.Namespace(obj),
@@ -240,7 +240,7 @@ func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj
 	mgr.AddCleaner(platformCleaner)
 
 	// create cleaner to remove orphaned pull secret copies from workload cluster
-	secretsToKeep := append(slices.Clone(helmValues.Global.ImagePullSecrets), corev1.LocalObjectReference{Name: cpServiceAccount.KubeAPIAccess()})
+	secretsToKeep := append(slices.Clone(helmValues.ImagePullSecrets), corev1.LocalObjectReference{Name: cpServiceAccount.KubeAPIAccess()})
 	workloadSecretCleaner := secret.NewSecretCleaner(workloadCluster, instance.Namespace(obj), secretsToKeep)
 	mgr.AddCleaner(workloadSecretCleaner)
 

@@ -83,12 +83,11 @@ spec:
 
       # Helm values for Metrics Operator deployment
       helmValues:
-        global:
-          # Image pull secrets for Metrics Operator controllers.
-          # These secrets will be automatically copied from the service provider's namespace
-          # to the tenant namespace on the Workload Cluster.
-          imagePullSecrets:
-            - name: "image-registry-credentials"
+        # Image pull secrets for Metrics Operator controllers.
+        # These secrets will be automatically copied from the service provider's namespace
+        # to the tenant namespace on the Workload Cluster.
+        imagePullSecrets:
+          - name: "image-registry-credentials"
         # Image location override
         image:
           repository: registry.internal.corp/images/metrics-operator
@@ -184,9 +183,8 @@ spec:
       chartURL: "oci://harbor.corp.internal/charts/metrics-operator"
       chartPullSecret: "harbor-credentials"
       helmValues:
-        global:
-          imagePullSecrets:
-            - name: "harbor-credentials"
+        imagePullSecrets:
+          - name: "harbor-credentials"
         image:
           repository: harbor.corp.internal/images/metrics-operator
           tag: v1.0.0

@@ -189,7 +189,7 @@ func TestManagePullSecrets_SyncsImagePullSecretToWorkloadCluster(t *testing.T) {
 		PodNamespace:      "openmcp-system",
 	}
 
-	helmValuesJSON := `{"global":{"imagePullSecrets":[{"name":"test-pull-secret"}]}}`
+	helmValuesJSON := `{"imagePullSecrets":[{"name":"test-pull-secret"}]}`
 	pc := &apiv1alpha1.ProviderConfig{
 		Spec: apiv1alpha1.ProviderConfigSpec{
 			Versions: []apiv1alpha1.MetricsOperatorVersion{
