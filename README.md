@@ -127,79 +127,39 @@ spec:
 Define the available versions of Metrics Operator in a `ProviderConfig` resource. This allows users to select which version of Metrics Operator they want to install on their `ControlPlane`.
 
 ```yaml
-# Apply this to the **platform** cluster
-apiVersion: metrics.services.open-control-plane.io/v1alpha1
-kind: ProviderConfig
-metadata:
-  name: metricsoperator
-spec:
-  pollInterval: 1m
-  versions:
-  - chartURL: oci://ghcr.io/openmcp-project/charts/metrics-operator
-    chartVersion: v1.0.0
-    version: v1.0.0
-  - chartURL: oci://ghcr.io/openmcp-project/charts/metrics-operator
-    chartVersion: v0.13.0
-    version: v0.13.0
-```
-
-## 📝 API Reference
-
-### MetricsOperator
-
-The `MetricsOperator` resource represents a Metrics Operator installation on a ControlPlane.
-
-```yaml
-# Apply this to the **onboarding** cluster
-apiVersion: metrics.services.open-control-plane.io/v1alpha1
-kind: MetricsOperator
-metadata:
-  name: my-metrics-operator
-  namespace: default
-spec:
-  version: "v1.0.0"
-```
-
-| Field          | Type   | Description                                    |
-| -------------- | ------ | ---------------------------------------------- |
-| `spec.version` | string | The version of Metrics Operator to install     |
-
-Note that any version that should be available to users must be defined in the [`ProviderConfig`](#configuration).
-
-### ProviderConfig
-
-The `ProviderConfig` resource configures deployment settings for each version of Metrics Operator that the service provider supports.
-
-```yaml
 apiVersion: metrics.services.open-control-plane.io/v1alpha1
 kind: ProviderConfig
 metadata:
   name: metricsoperator
 spec:
   # Optional: Reconciliation interval
-  pollInterval: "1m"
+  pollInterval: 1m
   # Optional: ConfigMapKeySelector for a custom CA bundle (configmap will be copied to the Workload Cluster under the fixed name 'custom-ca-bundle')
   caBundleRef:
-    name: "custom-ca-bundle"
-    key: "ca-bundle.crt"
+    name: custom-ca-bundle
+    key: ca-bundle.crt
   # The MetricsOperator versions that can be installed
   versions:
-    - version: "v1.0.0"
+    - version: v1.0.0
       # MetricsOperator Helm chart version
-      chartVersion: "v1.0.0"
+      chartVersion: v1.0.0
       # MetricsOperator Helm chart location
-      chartURL: "oci://ghcr.io/openmcp-project/charts/metrics-operator"
+      chartURL: oci://ghcr.io/openmcp-project/charts/metrics-operator
       # Optional: Secret for private chart registry
-      chartPullSecret: "chart-registry-credentials"
+      chartPullSecret: chart-registry-credentials
       # Optional: Custom Helm values
       helmValues:
         # Image pull secrets for private registries (will be copied to the Workload Cluster)
         imagePullSecrets:
-          - name: "image-registry-credentials"
+          - name: image-registry-credentials
         # Custom image
         image:
           repository: ghcr.io/openmcp-project/images/metrics-operator
           tag: v1.0.0
+    - version: v0.13.0
+      chartVersion: v0.13.0
+      chartURL: oci://ghcr.io/openmcp-project/charts/metrics-operator
+      # ...
 ```
 
 | Field               | Type                 | Description                                                                    |
@@ -228,6 +188,29 @@ A **version** item is defined as follows:
 ## 🔐 Air-Gapped Environments
 
 For air-gapped or enterprise environments, see the [Image Localization Guide](docs/configuration/image-localization.md).
+
+## 📝 API Reference
+
+### MetricsOperator
+
+The `MetricsOperator` resource represents a Metrics Operator installation on a ControlPlane.
+
+```yaml
+# Apply this to the **onboarding** cluster
+apiVersion: metrics.services.open-control-plane.io/v1alpha1
+kind: MetricsOperator
+metadata:
+  name: my-metrics-operator
+  namespace: default
+spec:
+  version: "v1.0.0"
+```
+
+| Field          | Type   | Description                                    |
+| -------------- | ------ | ---------------------------------------------- |
+| `spec.version` | string | The version of Metrics Operator to install     |
+
+Note that any version that should be available to users must be defined in the [`ProviderConfig`](#configuration).
 
 ## 🔧 Development Tasks
 
