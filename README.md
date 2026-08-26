@@ -178,7 +178,7 @@ metadata:
 spec:
   # Optional: Reconciliation interval
   pollInterval: "1m"
-  # Optional: ConfigMapKeySelector for a custom CA bundle (configmap will be copied to the Workload Cluster under the fixed name 'custom-ca-bundle')
+  # Optional: ConfigMapKeySelector for a custom CA bundle (configmap will be copied to the Workload Cluster under the name 'custom-ca-bundle')
   caBundleRef:
     name: "custom-ca-bundle"
     key: "ca-bundle.crt"
@@ -255,7 +255,7 @@ For air-gapped or enterprise environments, see the [Image Localization Guide](do
 | Custom CA support                 |   ✅    |                                                |
 | Release artifacts (image + OCM)   |   ✅    |                                                |
 | Testing                           |   ✅    |                                                |
-| Ownership and maintenance docs    |   ❌    |                                                |
+| Ownership and maintenance docs    |   ✅     |                                                |
 
 See the [OpenControlPlane Quality Criteria](https://open-control-plane.io/developers/serviceprovider/quality-criteria) for definitions.
 
