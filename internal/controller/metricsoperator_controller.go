@@ -261,12 +261,12 @@ func (r *MetricsOperatorReconciler) applyCABundle(obj *apiv1alpha1.MetricsOperat
 }
 
 func (r *MetricsOperatorReconciler) syncImagePullSecrets(workloadCluster resources.ManagedCluster, obj *apiv1alpha1.MetricsOperator, helmValues *helm.HelmValues) []corev1.LocalObjectReference {
-	secret.ManagePullSecrets(workloadCluster, helmValues.Global.ImagePullSecrets, secret.SecretCopyConfig{
+	secret.ManagePullSecrets(workloadCluster, helmValues.ImagePullSecrets, secret.SecretCopyConfig{
 		SourceClient:    r.PlatformCluster.Client(),
 		SourceNamespace: r.PodNamespace,
 		TargetNamespace: instance.Namespace(obj),
 	})
-	return helmValues.Global.ImagePullSecrets
+	return helmValues.ImagePullSecrets
 }
 
 func (r *MetricsOperatorReconciler) syncChartPullSecret(platformCluster resources.ManagedCluster, chartPullSecret, tenantNamespace string) (string, []corev1.LocalObjectReference, error) {
