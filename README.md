@@ -127,6 +127,7 @@ spec:
 Define the available versions of Metrics Operator in a `ProviderConfig` resource. This allows users to select which version of Metrics Operator they want to install on their `ControlPlane`.
 
 ```yaml
+# Apply this to the **platform** cluster
 apiVersion: metrics.services.open-control-plane.io/v1alpha1
 kind: ProviderConfig
 metadata:
