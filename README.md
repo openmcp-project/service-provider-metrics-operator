@@ -133,15 +133,62 @@ kind: ProviderConfig
 metadata:
   name: metricsoperator
 spec:
+  # Optional: Reconciliation interval
   pollInterval: 1m
+  # Optional: ConfigMapKeySelector for a custom CA bundle (configmap will be copied to the Workload Cluster under the fixed name 'custom-ca-bundle')
+  caBundleRef:
+    name: custom-ca-bundle
+    key: ca-bundle.crt
+  # The MetricsOperator versions that can be installed
   versions:
-  - chartURL: oci://ghcr.io/openmcp-project/charts/metrics-operator
-    chartVersion: v1.0.0
-    version: v1.0.0
-  - chartURL: oci://ghcr.io/openmcp-project/charts/metrics-operator
-    chartVersion: v0.13.0
-    version: v0.13.0
+    - version: v1.0.0
+      # MetricsOperator Helm chart version
+      chartVersion: v1.0.0
+      # MetricsOperator Helm chart location
+      chartURL: oci://ghcr.io/openmcp-project/charts/metrics-operator
+      # Optional: Secret for private chart registry
+      chartPullSecret: chart-registry-credentials
+      # Optional: Custom Helm values
+      helmValues:
+        # Image pull secrets for private registries (will be copied to the Workload Cluster)
+        imagePullSecrets:
+          - name: image-registry-credentials
+        # Custom image
+        image:
+          repository: ghcr.io/openmcp-project/images/metrics-operator
+          tag: v1.0.0
+    - version: v0.13.0
+      chartVersion: v0.13.0
+      chartURL: oci://ghcr.io/openmcp-project/charts/metrics-operator
+      # ...
 ```
+
+| Field               | Type                 | Description                                                                    |
+| ------------------- | -------------------- | ------------------------------------------------------------------------------ |
+| `spec.pollInterval` | duration             | How often to reconcile resources (default: 1m)                                 |
+| `spec.caBundleRef`  | ConfigMapKeySelector | A configmap with a CA bundle configured for the Metrics Operator controllers   |
+| `spec.versions`     | array                | The versions of Metrics Operator that can be installed                         |
+
+A **caBundleRef** is defined as follows:
+
+| Field  | Type   | Description                                                   |
+| ------ | ------ | --------------------------------------------------------------|
+| `name` | string | The name of the configmap which holds the CA bundle           |
+| `key`  | string | The key in the configmap under which the CA bundle is stored  |
+
+A **version** item is defined as follows:
+
+| Field             | Type   | Description                                              |
+| ----------------- | ------ | -------------------------------------------------------- |
+| `version`         | string | The Metrics Operator version that this item defines      |
+| `chartVersion`    | string | The Helm chart version to install                        |
+| `chartURL`        | string | OCI registry URL for the Helm chart                      |
+| `chartPullSecret` | string | Secret name for chart registry authentication            |
+| `helmValues`      | object | Custom Helm values passed directly to the HelmRelease    |         |
+
+## 🔐 Air-Gapped Environments
+
+For air-gapped or enterprise environments, see the [Image Localization Guide](docs/configuration/image-localization.md).
 
 ## 📝 API Reference
 
@@ -189,10 +236,10 @@ Note that any version that should be available to users must be defined in the [
 | Status reporting & error messages |   ✅    |                                                |
 | Operation annotations             |   ✅    |                                                |
 | API stability policy              |   ✅    |                                                |
-| Custom CA support                 |   ❌    |                                                |
-| Release artifacts (image + OCM)   |   ❌    |                                                |
+| Custom CA support                 |   ✅    |                                                |
+| Release artifacts (image + OCM)   |   ✅    |                                                |
 | Testing                           |   ✅    |                                                |
-| Ownership and maintenance docs    |   ❌    |                                                |
+| Ownership and maintenance docs    |   ✅     |                                                |
 
 See the [OpenControlPlane Quality Criteria](https://open-control-plane.io/developers/serviceprovider/quality-criteria) for definitions.
 
