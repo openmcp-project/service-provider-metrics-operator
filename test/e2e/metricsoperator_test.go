@@ -33,6 +33,16 @@ import (
 	klientresources "sigs.k8s.io/e2e-framework/klient/k8s/resources"
 )
 
+const (
+	mcpCAConfigMapName    = "custom-ca-bundle"
+	caConfigMapNameUpdate = "ca-bundle-update"
+	caConfigMapKey        = "ca.crt"
+	caVolumeName          = "custom-ca-bundle"
+	caMountPath           = "/etc/open-control-plane/custom-ca"
+	sslCertDirEnvName     = "SSL_CERT_DIR"
+	sslCertDirEnvValue    = "/etc/ssl/certs:/etc/pki/tls/certs:/etc/open-control-plane/custom-ca"
+)
+
 var testCP = ""
 
 func TestServiceProvider(t *testing.T) {
@@ -141,7 +151,7 @@ func TestServiceProvider(t *testing.T) {
 				return ctx
 			},
 		).
-		Assess("workload cluster: metrics-operator deployment and imagePullSecret exists",
+		Assess("workload cluster: metrics-operator deployment, imagePullSecret and ca configmap exists",
 			func(ctx context.Context, t *testing.T, c *envconf.Config) context.Context {
 				workloadConfig, err := clusterutils.ConfigByPrefix("workload", corev1.NamespaceDefault)
 				if err != nil {
@@ -178,10 +188,19 @@ func TestServiceProvider(t *testing.T) {
 				if err := wait.For(conditions.New(workloadConfig.Client().Resources()).ResourcesFound(list), wait.WithTimeout(2*time.Minute)); err != nil {
 					t.Errorf("image pull secret not found in namespace %s: %v", workloadNamespace, err)
 				}
+				caBundleConfigMap := &corev1.ConfigMap{}
+				caBundleConfigMap.SetName(mcpCAConfigMapName)
+				caBundleConfigMap.SetNamespace(workloadNamespace)
+				cmList := &corev1.ConfigMapList{
+					Items: []corev1.ConfigMap{*caBundleConfigMap},
+				}
+				if err := wait.For(conditions.New(workloadConfig.Client().Resources()).ResourcesFound(cmList), wait.WithTimeout(2*time.Minute)); err != nil {
+					t.Errorf("ca configmap not found in namespace %s: %v", workloadNamespace, err)
+				}
 				return ctx
 			},
 		).
-		Assess("provider config update with new secret references", func(ctx context.Context, t *testing.T, c *envconf.Config) context.Context {
+		Assess("provider config update with new secret and ca configmap references", func(ctx context.Context, t *testing.T, c *envconf.Config) context.Context {
 			platformConfig, err := clusterutils.ConfigByPrefix("platform", corev1.NamespaceDefault)
 			if err != nil {
 				t.Errorf("failed to get platform cluster config: %v", err)
@@ -202,6 +221,10 @@ func TestServiceProvider(t *testing.T) {
 					{Name: "registry-credentials-update"},
 				},
 			}
+			providerConfig.Spec.CABundleRef = &corev1.ConfigMapKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: caConfigMapNameUpdate},
+				Key:                  caConfigMapKey,
+			}
 			bytes, err := json.Marshal(values)
 			if err != nil {
 				t.Errorf("failed to marshal helm values: %v", err)
@@ -218,9 +241,8 @@ func TestServiceProvider(t *testing.T) {
 				t.Error(err)
 				return ctx
 			}
-			err = apiv1alpha1.AddToScheme(onboardingConfig.GetClient().Resources().GetScheme())
-			if err != nil {
-				t.Error(err)
+			if err := apiv1alpha1.AddToScheme(onboardingConfig.GetClient().Resources().GetScheme()); err != nil {
+				t.Errorf("failed to add api types to client scheme: %s", err)
 				return ctx
 			}
 			mo := &apiv1alpha1.MetricsOperator{}
@@ -294,7 +316,58 @@ func TestServiceProvider(t *testing.T) {
 			}
 			return ctx
 		}).
-		Assess("provider config update drops pull secrets", func(ctx context.Context, t *testing.T, c *envconf.Config) context.Context {
+		Assess("workload ca configmap updated", func(ctx context.Context, t *testing.T, c *envconf.Config) context.Context {
+			workloadConfig, err := clusterutils.ConfigByPrefix("workload", corev1.NamespaceDefault)
+			if err != nil {
+				t.Error(err)
+				return ctx
+			}
+			onboardingConfig, err := clusterutils.OnboardingConfig()
+			if err != nil {
+				t.Errorf("failed to get onboarding cluster config: %v", err)
+				return ctx
+			}
+			if err := apiv1alpha1.AddToScheme(onboardingConfig.Client().Resources().GetScheme()); err != nil {
+				t.Errorf("failed to add scheme: %v", err)
+				return ctx
+			}
+			obj := &apiv1alpha1.MetricsOperator{}
+			if err := onboardingConfig.Client().Resources().Get(ctx, testCP, corev1.NamespaceDefault, obj); err != nil {
+				t.Errorf("failed to get fetch MetricsOperator object: %v", err)
+				return ctx
+			}
+			workloadNamespace := instance.Namespace(obj)
+
+			// Verify that updated configmap exists
+			mcpCaConfigMap := &corev1.ConfigMap{}
+			mcpCaConfigMap.SetName(mcpCAConfigMapName)
+			mcpCaConfigMap.SetNamespace(workloadNamespace)
+			list := &corev1.ConfigMapList{
+				Items: []corev1.ConfigMap{*mcpCaConfigMap},
+			}
+
+			if err := wait.For(conditions.New(workloadConfig.Client().Resources()).ResourcesFound(list), wait.WithTimeout(2*time.Minute)); err != nil {
+				t.Errorf("ca configmap not found on workload cluster: %v", err)
+				return ctx
+			}
+
+			// Verify the configmap contains updated certificate data
+			if err := workloadConfig.Client().Resources().Get(ctx, mcpCAConfigMapName, workloadNamespace, mcpCaConfigMap); err != nil {
+				t.Errorf("failed to get ca configmap data: %v", err)
+				return ctx
+			}
+			caData, ok := mcpCaConfigMap.Data[caConfigMapKey]
+			if !ok {
+				t.Errorf("ca configmap missing key %s", caConfigMapKey)
+				return ctx
+			}
+			// Verify the data contains the expected updated certificate marker
+			if !strings.Contains(caData, "UpdatedDummyCertificate") {
+				t.Errorf("ca configmap does not contain expected updated certificate data. Got: %s", caData)
+			}
+			return ctx
+		}).
+		Assess("provider config update drops pull secrets and ca configmap", func(ctx context.Context, t *testing.T, c *envconf.Config) context.Context {
 			platformConfig, err := clusterutils.ConfigByPrefix("platform", corev1.NamespaceDefault)
 			if err != nil {
 				t.Errorf("failed to get platform cluster config: %v", err)
@@ -311,6 +384,7 @@ func TestServiceProvider(t *testing.T) {
 			}
 			providerConfig.Spec.Versions[0].ChartPullSecret = ""
 			providerConfig.Spec.Versions[0].HelmValues = nil
+			providerConfig.Spec.CABundleRef = nil
 			if err := platformConfig.Client().Resources().Update(ctx, providerConfig); err != nil {
 				t.Errorf("failed to update provider config: %v", err)
 			}
@@ -320,7 +394,10 @@ func TestServiceProvider(t *testing.T) {
 				t.Error(err)
 				return ctx
 			}
-			apiv1alpha1.AddToScheme(onboardingConfig.GetClient().Resources().GetScheme())
+			if err := apiv1alpha1.AddToScheme(onboardingConfig.GetClient().Resources().GetScheme()); err != nil {
+				t.Errorf("failed to add api types to client scheme: %s", err)
+				return ctx
+			}
 			mo := &apiv1alpha1.MetricsOperator{}
 			mo.SetName(testCP)
 			mo.SetNamespace(corev1.NamespaceDefault)
@@ -349,7 +426,7 @@ func TestServiceProvider(t *testing.T) {
 			}
 			return ctx
 		}).
-		Assess("workload image pull secrets deleted", func(ctx context.Context, t *testing.T, c *envconf.Config) context.Context {
+		Assess("workload image pull secrets and ca configmap deleted", func(ctx context.Context, t *testing.T, c *envconf.Config) context.Context {
 			workloadConfig, err := clusterutils.ConfigByPrefix("workload", corev1.NamespaceDefault)
 			if err != nil {
 				t.Error(err)
@@ -375,6 +452,13 @@ func TestServiceProvider(t *testing.T) {
 					labels.FormatLabels(map[string]string{meta.LabelManagedBy: meta.LabelManagedByValue}))),
 				wait.WithTimeout(2*time.Minute)); err != nil {
 				t.Errorf("orphaned image pull secret is not deleted: %v", err)
+			}
+			caConfigMap := &corev1.ConfigMapList{}
+			if err := wait.For(conditions.New(workloadConfig.Client().Resources().WithNamespace(instance.Namespace(obj))).
+				ResourceListN(caConfigMap, 0, klientresources.WithLabelSelector(
+					labels.FormatLabels(map[string]string{meta.LabelManagedBy: meta.LabelManagedByValue}))),
+				wait.WithTimeout(2*time.Minute)); err != nil {
+				t.Errorf("orphaned ca configmap is not deleted: %v", err)
 			}
 			return ctx
 		}).
