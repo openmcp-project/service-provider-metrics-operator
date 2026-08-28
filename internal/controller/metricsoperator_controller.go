@@ -40,6 +40,7 @@ import (
 	apiv1alpha1 "github.com/openmcp-project/service-provider-metrics-operator/api/v1alpha1"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/authn"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/authz"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/configmap"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/cpresources"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/flux"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/helm"
@@ -135,6 +136,9 @@ func userErrorMessage(err error) string {
 	if errors.Is(err, secret.ErrSecretCleanup) {
 		errorMessages = append(errorMessages, secret.ErrSecretCleanup.Error())
 	}
+	if errors.Is(err, configmap.ErrConfigMapCleanup) {
+		errorMessages = append(errorMessages, configmap.ErrConfigMapCleanup.Error())
+	}
 	if len(errorMessages) == 0 {
 		return err.Error()
 	}
@@ -142,78 +146,45 @@ func userErrorMessage(err error) string {
 }
 
 func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj *apiv1alpha1.MetricsOperator, pc *apiv1alpha1.ProviderConfig, clusters clusteraccess.ClusterContext) (resources.Manager, error) {
-	tenantNamespace, err := libutils.StableMCPNamespace(obj.Name, obj.Namespace)
-	if err != nil {
-		return nil, fmt.Errorf("failed to determine tenant namespace: %w", err)
-	}
-
-	if err := r.ensureInstanceID(ctx, obj); err != nil {
-		return nil, err
-	}
-
-	// select the requested version from the provider config
-	moVersion, err := selectMetricsOperatorVersion(obj.Spec.Version, pc)
+	tenantNamespace, moVersion, helmValues, err := r.prepareInputs(ctx, obj, pc)
 	if err != nil {
 		return nil, err
-	}
-	helmValues, err := helm.ExtractHelmValues(moVersion.HelmValues)
-	if err != nil {
-		return nil, fmt.Errorf("failed to extract helm values: %w", err)
 	}
 
 	platformCluster := resources.NewManagedCluster(r.PlatformCluster, r.PlatformCluster.RESTConfig(), tenantNamespace, resources.PlatformCluster)
 	workloadCluster := resources.NewManagedCluster(clusters.WorkloadCluster, clusters.WorkloadCluster.RESTConfig(), instance.Namespace(obj), resources.WorkloadCluster)
 	cpCluster := resources.NewManagedCluster(clusters.MCPCluster, clusters.MCPCluster.RESTConfig(), flux.DefaultNamespace, resources.ControlPlane)
 
+	mgr := resources.NewManager()
+	mgr.AddCluster(platformCluster)
+	mgr.AddCluster(workloadCluster)
+	mgr.AddCluster(cpCluster)
+
 	metricsNamespace := cpCluster.GetDefaultNamespace()
 	if helmValues.NamespaceOverride != "" {
 		metricsNamespace = helmValues.NamespaceOverride
 	}
 
-	// ### CP RESOURCES ###
-	// ServiceAccount on CP + token Secret on workload cluster so --install-crds connects to CP.
-	cpServiceAccount := &authn.ManagedServiceAccount{
-		NamespacedName: k8stypes.NamespacedName{
-			Name:      "metrics-operator-server",
-			Namespace: metricsNamespace,
-		},
-	}
-
-	cpServiceAccount.Configure(workloadCluster, cpCluster, pc.PollInterval())
-
-	moVersion.HelmValues, err = helm.AddAuthToHelmValues(moVersion.HelmValues, cpCluster, cpServiceAccount.KubeAPIAccess())
+	moVersion, authSecretsToKeep, err := setupAuth(pc, moVersion, workloadCluster, cpCluster, metricsNamespace)
 	if err != nil {
-		return nil, fmt.Errorf("failed to inject CP auth into helm values: %w", err)
+		return nil, err
 	}
-	moVersion.HelmValues, err = helm.AddDefaultHelmValues(moVersion.HelmValues, metricsNamespace)
+
+	prefixedChartPullSecret, chartSecretsToKeep, err := r.syncChartPullSecret(platformCluster, moVersion.ChartPullSecret, tenantNamespace)
 	if err != nil {
-		return nil, fmt.Errorf("failed to set default helm values: %w", err)
+		return nil, err
 	}
-	authz.Configure(cpCluster, cpServiceAccount)
 
-	// Sync image pull secrets from platform cluster to workload
-	secret.ManagePullSecrets(workloadCluster, helmValues.Global.ImagePullSecrets, secret.SecretCopyConfig{
-		SourceClient:    r.PlatformCluster.Client(),
-		SourceNamespace: r.PodNamespace,
-		TargetNamespace: instance.Namespace(obj),
-	})
+	imagePullSecretsToKeep := r.syncImagePullSecrets(workloadCluster, obj, helmValues)
 
-	// Sync chart pull secret within platform cluster from pod namespace to tenant namespace
-	var prefixedChartPullSecret string
-	if moVersion.ChartPullSecret != "" {
-		prefixedChartPullSecret, err = secret.PrefixSecretName(moVersion.ChartPullSecret)
-		if err != nil {
-			return nil, fmt.Errorf("error generating secret name: %w", err)
-		}
-		secret.ManagePullSecrets(platformCluster, []corev1.LocalObjectReference{
-			{Name: moVersion.ChartPullSecret},
-		}, secret.SecretCopyConfig{
-			SourceClient:    r.PlatformCluster.Client(),
-			SourceNamespace: r.PodNamespace,
-			TargetNamespace: tenantNamespace,
-			TargetName:      prefixedChartPullSecret,
-		})
+	moVersion, caConfigMapsToKeep, err := r.applyCABundle(obj, pc, moVersion, workloadCluster)
+	if err != nil {
+		return nil, err
 	}
+
+	mgr.AddCleaner(configmap.NewConfigMapCleaner(workloadCluster, instance.Namespace(obj), caConfigMapsToKeep))
+	mgr.AddCleaner(secret.NewSecretCleaner(workloadCluster, instance.Namespace(obj), append(slices.Clone(imagePullSecretsToKeep), authSecretsToKeep...)))
+	mgr.AddCleaner(secret.NewSecretCleaner(platformCluster, tenantNamespace, chartSecretsToKeep))
 
 	flux.ManageFluxResources(flux.ManageFluxResourcesParams{
 		Cluster:             platformCluster,
@@ -226,25 +197,95 @@ func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj
 		RequestedVersion:    moVersion,
 	})
 
-	mgr := resources.NewManager()
-	mgr.AddCluster(cpCluster)
-	mgr.AddCluster(workloadCluster)
-	mgr.AddCluster(platformCluster)
-
-	// create cleaner to remove orphaned pull secret copies from platform tenant namespace
-	platformCleaner := secret.NewSecretCleaner(platformCluster, tenantNamespace, []corev1.LocalObjectReference{
-		{
-			Name: prefixedChartPullSecret,
-		},
-	})
-	mgr.AddCleaner(platformCleaner)
-
-	// create cleaner to remove orphaned pull secret copies from workload cluster
-	secretsToKeep := append(slices.Clone(helmValues.Global.ImagePullSecrets), corev1.LocalObjectReference{Name: cpServiceAccount.KubeAPIAccess()})
-	workloadSecretCleaner := secret.NewSecretCleaner(workloadCluster, instance.Namespace(obj), secretsToKeep)
-	mgr.AddCleaner(workloadSecretCleaner)
-
 	return mgr, nil
+}
+
+func (r *MetricsOperatorReconciler) prepareInputs(ctx context.Context, obj *apiv1alpha1.MetricsOperator, pc *apiv1alpha1.ProviderConfig) (string, apiv1alpha1.MetricsOperatorVersion, *helm.HelmValues, error) {
+	tenantNamespace, err := libutils.StableMCPNamespace(obj.Name, obj.Namespace)
+	if err != nil {
+		return "", apiv1alpha1.MetricsOperatorVersion{}, nil, fmt.Errorf("failed to determine tenant namespace: %w", err)
+	}
+	err = r.ensureInstanceID(ctx, obj)
+	if err != nil {
+		return "", apiv1alpha1.MetricsOperatorVersion{}, nil, fmt.Errorf("failed to set instance id: %w", err)
+	}
+	moVersion, err := selectMetricsOperatorVersion(obj.Spec.Version, pc)
+	if err != nil {
+		return "", apiv1alpha1.MetricsOperatorVersion{}, nil, fmt.Errorf("failed to select metrics operator version: %w", err)
+	}
+	helmValues, err := helm.ExtractHelmValues(moVersion.HelmValues)
+	if err != nil {
+		return "", apiv1alpha1.MetricsOperatorVersion{}, nil, fmt.Errorf("failed to extract helm values: %w", err)
+	}
+	return tenantNamespace, moVersion, helmValues, nil
+}
+
+func setupAuth(pc *apiv1alpha1.ProviderConfig, moVersion apiv1alpha1.MetricsOperatorVersion, workloadCluster, cpCluster resources.ManagedCluster, metricsNamespace string) (apiv1alpha1.MetricsOperatorVersion, []corev1.LocalObjectReference, error) {
+	cpServiceAccount := &authn.ManagedServiceAccount{
+		NamespacedName: k8stypes.NamespacedName{
+			Name:      "metrics-operator-server",
+			Namespace: metricsNamespace,
+		},
+	}
+	cpServiceAccount.Configure(workloadCluster, cpCluster, pc.PollInterval())
+
+	var err error
+	moVersion.HelmValues, err = helm.AddAuthToHelmValues(moVersion.HelmValues, cpCluster, cpServiceAccount.KubeAPIAccess())
+	if err != nil {
+		return moVersion, nil, fmt.Errorf("failed to inject CP auth into helm values: %w", err)
+	}
+	moVersion.HelmValues, err = helm.AddDefaultHelmValues(moVersion.HelmValues, metricsNamespace)
+	if err != nil {
+		return moVersion, nil, fmt.Errorf("failed to set default helm values: %w", err)
+	}
+	authz.Configure(cpCluster, cpServiceAccount)
+	return moVersion, []corev1.LocalObjectReference{{Name: cpServiceAccount.KubeAPIAccess()}}, nil
+}
+
+func (r *MetricsOperatorReconciler) applyCABundle(obj *apiv1alpha1.MetricsOperator, pc *apiv1alpha1.ProviderConfig, moVersion apiv1alpha1.MetricsOperatorVersion, workloadCluster resources.ManagedCluster) (apiv1alpha1.MetricsOperatorVersion, []corev1.LocalObjectReference, error) {
+	if pc.Spec.CABundleRef == nil {
+		return moVersion, nil, nil
+	}
+	var err error
+	moVersion.HelmValues, err = helm.AddCAHelmValues(moVersion.HelmValues, pc.Spec.CABundleRef)
+	if err != nil {
+		return moVersion, nil, fmt.Errorf("failed to add ca volume to helm values: %w", err)
+	}
+	configmap.ManageCaConfigMap(workloadCluster, pc.Spec.CABundleRef.LocalObjectReference, configmap.ConfigMapCopyConfig{
+		SourceClient:    r.PlatformCluster.Client(),
+		SourceNamespace: r.PodNamespace,
+		TargetNamespace: instance.Namespace(obj),
+		TargetName:      helm.CustomCABundleConfigMapName,
+	})
+	return moVersion, []corev1.LocalObjectReference{{Name: helm.CustomCABundleConfigMapName}}, nil
+}
+
+func (r *MetricsOperatorReconciler) syncImagePullSecrets(workloadCluster resources.ManagedCluster, obj *apiv1alpha1.MetricsOperator, helmValues *helm.HelmValues) []corev1.LocalObjectReference {
+	secret.ManagePullSecrets(workloadCluster, helmValues.ImagePullSecrets, secret.SecretCopyConfig{
+		SourceClient:    r.PlatformCluster.Client(),
+		SourceNamespace: r.PodNamespace,
+		TargetNamespace: instance.Namespace(obj),
+	})
+	return helmValues.ImagePullSecrets
+}
+
+func (r *MetricsOperatorReconciler) syncChartPullSecret(platformCluster resources.ManagedCluster, chartPullSecret, tenantNamespace string) (string, []corev1.LocalObjectReference, error) {
+	if chartPullSecret == "" {
+		return "", nil, nil
+	}
+	prefixedName, err := secret.PrefixSecretName(chartPullSecret)
+	if err != nil {
+		return "", nil, fmt.Errorf("error generating secret name: %w", err)
+	}
+	secret.ManagePullSecrets(platformCluster, []corev1.LocalObjectReference{
+		{Name: chartPullSecret},
+	}, secret.SecretCopyConfig{
+		SourceClient:    r.PlatformCluster.Client(),
+		SourceNamespace: r.PodNamespace,
+		TargetNamespace: tenantNamespace,
+		TargetName:      prefixedName,
+	})
+	return prefixedName, []corev1.LocalObjectReference{{Name: prefixedName}}, nil
 }
 
 func selectMetricsOperatorVersion(requestedVersion string, pc *apiv1alpha1.ProviderConfig) (apiv1alpha1.MetricsOperatorVersion, error) {
