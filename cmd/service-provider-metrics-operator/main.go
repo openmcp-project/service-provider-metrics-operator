@@ -58,6 +58,8 @@ import (
 	"github.com/openmcp-project/service-provider-metrics-operator/api/crds"
 	metricsoperatorsv1alpha1 "github.com/openmcp-project/service-provider-metrics-operator/api/v1alpha1"
 	"github.com/openmcp-project/service-provider-metrics-operator/internal/controller"
+
+	"github.com/openmcp-project/controller-utils/pkg/fips"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -117,6 +119,9 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
+
+	fips.Verify(context.Background())
+
 	flag.StringVar(&environment, "environment", "", "Name of the environment")
 	flag.StringVar(&providerName, "provider-name", "metrics-operator", "Name of the provider resource")
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
