@@ -14,7 +14,7 @@ require (
 	github.com/openmcp-project/openmcp-testing v1.3.1
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.12.1
-	golang.org/x/sync v0.22.0
+	golang.org/x/sync v0.23.0
 	k8s.io/api v0.37.0
 	k8s.io/apiextensions-apiserver v0.37.0
 	k8s.io/apimachinery v0.37.0
