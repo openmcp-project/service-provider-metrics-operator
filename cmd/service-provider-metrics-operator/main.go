@@ -420,8 +420,8 @@ func main() {
 		WorkloadCluster(true).
 		MustBuild()
 
-	if err := spr.SetupWithManager(mgr, "metricsoperator"); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "MetricsOperator")
+	if err := spr.SetupWithManager(mgr, providerName); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", providerName)
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
