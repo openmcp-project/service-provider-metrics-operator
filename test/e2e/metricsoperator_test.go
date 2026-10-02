@@ -402,7 +402,12 @@ func TestServiceProvider(t *testing.T) {
 			mo.SetName(testCP)
 			mo.SetNamespace(corev1.NamespaceDefault)
 			if err := wait.For(openmcpconditions.Match(mo, onboardingConfig, "Ready", corev1.ConditionTrue), wait.WithTimeout(2*time.Minute)); err != nil {
-				t.Errorf("MetricsOperator not ready after provider config update: %v", err)
+				current := &apiv1alpha1.MetricsOperator{}
+				if getErr := onboardingConfig.Client().Resources().Get(ctx, mo.GetName(), mo.GetNamespace(), current); getErr == nil {
+					t.Errorf("MetricsOperator not ready after provider config update: %v — conditions=%v resources=%+v", err, current.Status.Conditions, current.Status.Resources)
+				} else {
+					t.Errorf("MetricsOperator not ready after provider config update: %v; failed to read status: %v", err, getErr)
+				}
 			}
 			return ctx
 		}).
