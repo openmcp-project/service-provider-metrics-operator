@@ -11,7 +11,7 @@ spec:
       # renovate: datasource=docker depName=ghcr.io/openmcp-project/charts/metrics-operator
     - version: "v1.1.0"
       # renovate: datasource=docker depName=ghcr.io/openmcp-project/charts/metrics-operator
-      chartVersion: "v1.1.0"
+      chartVersion: "v1.2.1"
       chartURL: oci://ghcr.io/openmcp-project/charts/metrics-operator
       chartPullSecret: registry-credentials
       helmValues:
