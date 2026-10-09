@@ -4,4 +4,4 @@ metadata:
   name: test-mcp
 spec:
   # renovate: datasource=docker depName=ghcr.io/openmcp-project/charts/metrics-operator
-  version: "v1.1.0"
+  version: "v1.2.1"
