@@ -1,6 +1,4 @@
 # Default owners for everything in the repository.
 # https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
 * @openmcp-project/sig-extensibility-approvers
-* @christophrj
-* @MichaelSp
-* @AndresNico
+* @MichaelSp @AndresNico # get notified for PRs
