@@ -2,12 +2,14 @@ package flux
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
-	"github.com/fluxcd/pkg/apis/meta"
+	fluxmeta "github.com/fluxcd/pkg/apis/meta"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -49,6 +51,22 @@ type ManageFluxResourcesParams struct {
 	RequestedVersion apiv1alpha1.MetricsOperatorVersion
 }
 
+// specHash returns a hex SHA-256 of the JSON-marshaled inputs.
+// Used as the value of reconcile.fluxcd.io/requestedAt: Flux triggers an immediate
+// out-of-interval reconciliation whenever this annotation value changes, which is the
+// standard Flux mechanism for requesting reconciliation on spec changes.
+func specHash(inputs ...any) (string, error) {
+	h := sha256.New()
+	for _, v := range inputs {
+		b, err := json.Marshal(v)
+		if err != nil {
+			return "", fmt.Errorf("failed to hash spec input: %w", err)
+		}
+		h.Write(b)
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
 // ManageFluxResources configures OCIRepo and HelmRelease
 func ManageFluxResources(p ManageFluxResourcesParams) {
 	ociRepo := resources.NewManagedObject(&sourcev1.OCIRepository{
@@ -83,7 +101,7 @@ func ManageFluxResources(p ManageFluxResourcesParams) {
 				},
 			}
 			if p.ChartPullSecretName != "" {
-				ociRepo.Spec.SecretRef = &meta.LocalObjectReference{
+				ociRepo.Spec.SecretRef = &fluxmeta.LocalObjectReference{
 					Name: p.ChartPullSecretName,
 				}
 			}
@@ -113,8 +131,8 @@ func ManageFluxResources(p ManageFluxResourcesParams) {
 					Name:      OCIRepositoryName,
 					Namespace: p.Cluster.GetDefaultNamespace(),
 				},
-				KubeConfig: &meta.KubeConfigReference{
-					SecretRef: &meta.SecretKeyReference{
+				KubeConfig: &fluxmeta.KubeConfigReference{
+					SecretRef: &fluxmeta.SecretKeyReference{
 						Name: p.ClusterContext.WorkloadAccessSecretKey.Name,
 						Key:  "kubeconfig",
 					},
@@ -132,6 +150,25 @@ func ManageFluxResources(p ManageFluxResourcesParams) {
 				TargetNamespace:  p.WorkloadNamespace,
 				StorageNamespace: p.WorkloadNamespace,
 			}
+			// Set reconcile.fluxcd.io/requestedAt to a hash of the spec inputs that affect the
+			// HelmRelease behaviour. When any of these change, Flux triggers an immediate
+			// out-of-interval reconciliation rather than waiting up to Interval (1m by default).
+			// This is the standard Flux mechanism for requesting reconciliation on spec changes;
+			// using a content hash keeps the annotation stable when nothing has changed.
+			hash, err := specHash(
+				p.RequestedVersion.HelmValues,
+				p.WorkloadNamespace,
+				p.ClusterContext.WorkloadAccessSecretKey.Name,
+			)
+			if err != nil {
+				return err
+			}
+			annotations := helmRelease.GetAnnotations()
+			if annotations == nil {
+				annotations = make(map[string]string)
+			}
+			annotations[fluxmeta.ReconcileRequestAnnotation] = hash
+			helmRelease.SetAnnotations(annotations)
 			return nil
 		},
 		DependsOn:      []resources.ManagedObject{ociRepo},
@@ -152,7 +189,7 @@ func FluxStatus(o client.Object, rl apiv1alpha1.ResourceLocation) resources.Stat
 			Location: rl,
 		}
 	}
-	if conditions.IsTrue(fluxObject, meta.ReadyCondition) {
+	if conditions.IsTrue(fluxObject, fluxmeta.ReadyCondition) {
 		return resources.Status{
 			Phase:    apiv1alpha1.Ready,
 			Message:  "Resource is ready",
