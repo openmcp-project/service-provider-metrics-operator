@@ -2,12 +2,14 @@ package flux
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
-	"github.com/fluxcd/pkg/apis/meta"
+	fluxmeta "github.com/fluxcd/pkg/apis/meta"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -28,6 +30,29 @@ const (
 	// HelmReleaseName is the name of the Metrics Operator HelmRelease resource
 	HelmReleaseName = "metrics-operator"
 )
+
+// setReconcileAnnotation sets the reconcile.fluxcd.io/requestedAt annotation to a hash of
+// the provided inputs. Flux compares this value against lastHandledReconcileAt in status;
+// a change in value triggers an immediate out-of-interval reconciliation. Using a
+// content-derived hash ensures the annotation only changes when the spec actually changes,
+// so Flux is not triggered on every controller pass.
+func setReconcileAnnotation(o client.Object, inputs ...any) error {
+	h := sha256.New()
+	for _, v := range inputs {
+		b, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Errorf("failed to hash reconcile input: %w", err)
+		}
+		h.Write(b)
+	}
+	annotations := o.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+	annotations[fluxmeta.ReconcileRequestAnnotation] = fmt.Sprintf("%x", h.Sum(nil))
+	o.SetAnnotations(annotations)
+	return nil
+}
 
 // ManageFluxResourcesParams groups all parameters to create the required managed flux resources
 type ManageFluxResourcesParams struct {
@@ -83,11 +108,15 @@ func ManageFluxResources(p ManageFluxResourcesParams) {
 				},
 			}
 			if p.ChartPullSecretName != "" {
-				ociRepo.Spec.SecretRef = &meta.LocalObjectReference{
+				ociRepo.Spec.SecretRef = &fluxmeta.LocalObjectReference{
 					Name: p.ChartPullSecretName,
 				}
 			}
-			return nil
+			return setReconcileAnnotation(ociRepo,
+				p.RequestedVersion.ChartURL,
+				p.RequestedVersion.ChartVersion,
+				p.ChartPullSecretName,
+			)
 		},
 		DependsOn:      []resources.ManagedObject{},
 		DeletionPolicy: resources.Delete,
@@ -113,8 +142,8 @@ func ManageFluxResources(p ManageFluxResourcesParams) {
 					Name:      OCIRepositoryName,
 					Namespace: p.Cluster.GetDefaultNamespace(),
 				},
-				KubeConfig: &meta.KubeConfigReference{
-					SecretRef: &meta.SecretKeyReference{
+				KubeConfig: &fluxmeta.KubeConfigReference{
+					SecretRef: &fluxmeta.SecretKeyReference{
 						Name: p.ClusterContext.WorkloadAccessSecretKey.Name,
 						Key:  "kubeconfig",
 					},
@@ -132,7 +161,11 @@ func ManageFluxResources(p ManageFluxResourcesParams) {
 				TargetNamespace:  p.WorkloadNamespace,
 				StorageNamespace: p.WorkloadNamespace,
 			}
-			return nil
+			return setReconcileAnnotation(helmRelease,
+				p.RequestedVersion.HelmValues,
+				p.WorkloadNamespace,
+				p.ClusterContext.WorkloadAccessSecretKey.Name,
+			)
 		},
 		DependsOn:      []resources.ManagedObject{ociRepo},
 		DeletionPolicy: resources.Delete,
@@ -152,7 +185,7 @@ func FluxStatus(o client.Object, rl apiv1alpha1.ResourceLocation) resources.Stat
 			Location: rl,
 		}
 	}
-	if conditions.IsTrue(fluxObject, meta.ReadyCondition) {
+	if conditions.IsTrue(fluxObject, fluxmeta.ReadyCondition) {
 		return resources.Status{
 			Phase:    apiv1alpha1.Ready,
 			Message:  "Resource is ready",
