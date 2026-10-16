@@ -82,6 +82,11 @@ func (r *MetricsOperatorReconciler) CreateOrUpdate(ctx context.Context, obj *api
 	if resultContainsErrors || err != nil {
 		return ctrl.Result{}, updateStatusError(obj, resultContainsErrors, err)
 	}
+	if !allResourcesReady(managedResources) {
+		// Resources are pending (e.g. Flux HelmRelease re-reconciling after a spec change).
+		// Requeue quickly so we pick up the Ready transition without waiting the full PollInterval.
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
 	return ctrl.Result{}, nil
 }
 
