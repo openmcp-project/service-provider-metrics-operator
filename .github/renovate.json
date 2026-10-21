@@ -30,7 +30,7 @@
         "/test/e2e/.*\\.yaml$/"
       ],
       "matchStrings": [
-        "# renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+)\\s+\\w+:\\s+\"?(?<currentValue>[^\\s\"]+)\"?"
+        "# renovate: datasource=(?<datasource>[^\\s]+) depName=(?<depName>[^\\s]+)\\s+-?\\s+\\w+:\\s+\"?(?<currentValue>[^\\s\"]+)\"?"
       ]
     }
   ]
