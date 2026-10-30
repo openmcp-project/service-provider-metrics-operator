@@ -31,7 +31,7 @@ func TestMain(m *testing.M) {
 		Operator: setup.OpenMCPOperatorSetup{
 			Name: "openmcp-operator",
 			// renovate: datasource=docker depName=ghcr.io/openmcp-project/images/openmcp-operator
-			Image:        "ghcr.io/openmcp-project/images/openmcp-operator:v1.4.2",
+			Image:        "ghcr.io/openmcp-project/images/openmcp-operator:v1.4.4",
 			Environment:  "debug",
 			PlatformName: "platform",
 		},
