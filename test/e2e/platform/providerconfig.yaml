@@ -9,9 +9,9 @@ spec:
     key: ca.crt
   versions:
       # renovate: datasource=docker depName=ghcr.io/openmcp-project/charts/metrics-operator
-    - version: "v1.2.2"
+    - version: "v1.2.3"
       # renovate: datasource=docker depName=ghcr.io/openmcp-project/charts/metrics-operator
-      chartVersion: "v1.2.2"
+      chartVersion: "v1.2.3"
       chartURL: oci://ghcr.io/openmcp-project/charts/metrics-operator
       chartPullSecret: registry-credentials
       helmValues:
