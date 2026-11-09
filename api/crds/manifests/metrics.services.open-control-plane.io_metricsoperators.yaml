@@ -6,6 +6,7 @@ metadata:
     controller-gen.kubebuilder.io/version: v0.23.0
   labels:
     openmcp.cloud/cluster: onboarding
+    services.open-control-plane.io/kind: MetricsOperator
   name: metricsoperators.metrics.services.open-control-plane.io
 spec:
   group: metrics.services.open-control-plane.io

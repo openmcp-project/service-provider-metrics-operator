@@ -76,6 +76,7 @@ type ManagedResource struct {
 // +kubebuilder:printcolumn:JSONPath=`.status.phase`,name="Phase",type=string
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:metadata:labels="openmcp.cloud/cluster=onboarding"
+// +kubebuilder:metadata:labels="services.open-control-plane.io/kind=MetricsOperator"
 type MetricsOperator struct {
 	metav1.TypeMeta `json:",inline"`
 
