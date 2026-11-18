@@ -45,6 +45,7 @@ import (
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
 	crdutil "github.com/openmcp-project/controller-utils/pkg/crds"
 	"github.com/openmcp-project/controller-utils/pkg/logging"
+	"github.com/openmcp-project/extensibility-utils/pkg/tokenrefresh"
 	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider"
 	localaccess "github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider/clusteraccess"
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
@@ -58,6 +59,7 @@ import (
 	"github.com/openmcp-project/service-provider-metrics-operator/api/crds"
 	metricsoperatorsv1alpha1 "github.com/openmcp-project/service-provider-metrics-operator/api/v1alpha1"
 	"github.com/openmcp-project/service-provider-metrics-operator/internal/controller"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/authn"
 
 	"github.com/openmcp-project/controller-utils/pkg/fips"
 	// +kubebuilder:scaffold:imports
@@ -405,23 +407,46 @@ func main() {
 		Register(workloadClusterRequest).
 		WithRetryInterval(10 * time.Second)
 
+	moReconciler := &controller.MetricsOperatorReconciler{
+		OnboardingCluster: onboardingCluster,
+		PlatformCluster:   platformCluster,
+		PodNamespace:      podNamespace,
+	}
 	spr := serviceprovider.NewAPIReconcilerBuilder[*metricsoperatorsv1alpha1.MetricsOperator, *metricsoperatorsv1alpha1.ProviderConfig]().
 		EmptyObjectProvider(func() *metricsoperatorsv1alpha1.MetricsOperator { return &metricsoperatorsv1alpha1.MetricsOperator{} }).
 		EmptyConfigProvider(func() *metricsoperatorsv1alpha1.ProviderConfig { return &metricsoperatorsv1alpha1.ProviderConfig{} }).
 		PlatformCluster(platformCluster).
 		OnboardingCluster(onboardingCluster).
 		SecretNamespace(podNamespace).
-		Reconciler(&controller.MetricsOperatorReconciler{
-			OnboardingCluster: onboardingCluster,
-			PlatformCluster:   platformCluster,
-			PodNamespace:      podNamespace,
-		}).
+		Reconciler(moReconciler).
 		AdvancedClusterAccessReconciler(clusterAccessReconciler).
 		WorkloadCluster(true).
 		MustBuild()
 
 	if err := spr.SetupWithManager(mgr, providerName); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", providerName)
+		os.Exit(1)
+	}
+	tokenRefresher := &tokenrefresh.Reconciler[*metricsoperatorsv1alpha1.MetricsOperator]{
+		Client:              mgr.GetClient(),
+		ServiceProviderName: authn.TokenServiceProvider,
+		NewObject:           func() *metricsoperatorsv1alpha1.MetricsOperator { return &metricsoperatorsv1alpha1.MetricsOperator{} },
+		// only read access, the AccessRequests are managed by the MetricsOperator controller
+		Clusters: func(ctx context.Context, req reconcile.Request) (*clusters.Cluster, *clusters.Cluster, error) {
+			cpCluster, err := clusterAccessReconciler.Access(ctx, req, clustersv1alpha1.PURPOSE_MCP)
+			if err != nil {
+				return nil, nil, err
+			}
+			workloadCluster, err := clusterAccessReconciler.Access(ctx, req, clustersv1alpha1.PURPOSE_WORKLOAD)
+			if err != nil {
+				return nil, nil, err
+			}
+			return cpCluster, workloadCluster, nil
+		},
+		Binding: moReconciler.TokenBinding(providerName),
+	}
+	if err := tokenRefresher.SetupWithManager(mgr, "metrics-operator-token-refresh"); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "MetricsOperatorTokenRefresh")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

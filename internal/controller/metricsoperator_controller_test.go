@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -27,6 +28,7 @@ import (
 
 	apiv1alpha1 "github.com/openmcp-project/service-provider-metrics-operator/api/v1alpha1"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/cpresources"
+	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/flux"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/helm"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/instance"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/secret"
@@ -169,6 +171,102 @@ func TestSelectVersion(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "v9.9.9")
 	})
+}
+
+func TestTokenBinding(t *testing.T) {
+	const providerName = "metrics-operator"
+	providerConfig := func() *apiv1alpha1.ProviderConfig {
+		return &apiv1alpha1.ProviderConfig{
+			ObjectMeta: metav1.ObjectMeta{Name: providerName},
+			Spec: apiv1alpha1.ProviderConfigSpec{
+				Versions: []apiv1alpha1.MetricsOperatorVersion{
+					{Version: version1, ChartVersion: version1, ChartURL: new("oci://example.com/chart")},
+					{Version: version2, ChartVersion: version2, ChartURL: new("oci://example.com/chart"),
+						HelmValues: &apiextensionsv1.JSON{Raw: []byte(`{"namespaceOverride": "custom-ns"}`)}},
+				},
+			},
+		}
+	}
+	tests := []struct {
+		name          string
+		obj           func() *apiv1alpha1.MetricsOperator
+		pc            *apiv1alpha1.ProviderConfig
+		wantOK        bool
+		wantErr       bool
+		wantNamespace string
+	}{
+		{
+			name: "no instance ID is not ready",
+			obj: func() *apiv1alpha1.MetricsOperator {
+				return &apiv1alpha1.MetricsOperator{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"}}
+			},
+			pc: providerConfig(),
+		},
+		{
+			name: "default namespace",
+			obj: func() *apiv1alpha1.MetricsOperator {
+				obj := moWithInstanceID()
+				obj.Spec.Version = version1
+				return obj
+			},
+			pc:            providerConfig(),
+			wantOK:        true,
+			wantNamespace: flux.DefaultNamespace,
+		},
+		{
+			name: "namespace override from the selected version",
+			obj: func() *apiv1alpha1.MetricsOperator {
+				obj := moWithInstanceID()
+				obj.Spec.Version = version2
+				return obj
+			},
+			pc:            providerConfig(),
+			wantOK:        true,
+			wantNamespace: "custom-ns",
+		},
+		{
+			name: "missing provider config returns an error",
+			obj: func() *apiv1alpha1.MetricsOperator {
+				obj := moWithInstanceID()
+				obj.Spec.Version = version1
+				return obj
+			},
+			wantErr: true,
+		},
+		{
+			name: "unknown version returns an error",
+			obj: func() *apiv1alpha1.MetricsOperator {
+				obj := moWithInstanceID()
+				obj.Spec.Version = "v9.9.9"
+				return obj
+			},
+			pc:      providerConfig(),
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var objs []client.Object
+			if tt.pc != nil {
+				objs = append(objs, tt.pc)
+			}
+			r := &MetricsOperatorReconciler{PlatformCluster: testutils.CreateTestClusterWithClient(t, "platform", objs...)}
+			obj := tt.obj()
+
+			binding, ok, err := r.TokenBinding(providerName)(context.Background(), obj)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantOK, ok)
+			if !tt.wantOK {
+				return
+			}
+			assert.Equal(t, k8stypes.NamespacedName{Name: "metrics-operator-server", Namespace: tt.wantNamespace}, binding.ServiceAccount)
+			assert.Equal(t, k8stypes.NamespacedName{Name: "kube-api-access-metrics-operator-server", Namespace: instance.Namespace(obj)}, binding.Secret)
+		})
+	}
 }
 
 func TestManagePullSecrets_SyncsImagePullSecretToWorkloadCluster(t *testing.T) {

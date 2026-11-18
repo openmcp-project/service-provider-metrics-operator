@@ -59,6 +59,15 @@ flowchart LR
   mcpapi -- represents --> mcp
 ```
 
+### ControlPlane Access
+
+The Metrics Operator controllers authenticate against the ControlPlane with a token of the ServiceAccount `metrics-operator/metrics-operator-server` on the ControlPlane (the namespace follows `namespaceOverride` in the Helm values of the selected version, if set). The token is stored in the Secret `kube-api-access-metrics-operator-server` in the tenant namespace on the workload cluster and mounted at `/var/run/secrets/kubernetes.io/serviceaccount`; `KUBERNETES_SERVICE_HOST`/`KUBERNETES_SERVICE_PORT` point to the ControlPlane API server.
+
+- The MetricsOperator controller creates the Secret with an initial token.
+- A dedicated `metrics-operator-token-refresh` controller ([`extensibility-utils/pkg/tokenrefresh`](https://github.com/openmcp-project/extensibility-utils)) renews the token at 80% of its validity (1h tokens), independent of `spec.pollInterval`.
+- Token creation and expiration time are tracked in the annotations `metrics-operator.services.open-control-plane.io/token-creation-time` and `metrics-operator.services.open-control-plane.io/token-expiration-time`.
+- The pods are not restarted on renewal: the kubelet updates the mounted Secret and the Kubernetes client re-reads the token file.
+
 ## 🚦 Getting Started
 
 ### Prerequisites
@@ -167,7 +176,7 @@ spec:
 
 | Field               | Type                 | Description                                                                    |
 | ------------------- | -------------------- | ------------------------------------------------------------------------------ |
-| `spec.pollInterval` | duration             | How often to reconcile resources (default: 1m)                                 |
+| `spec.pollInterval` | duration             | How often to reconcile resources and the Flux sync interval (default: 1m)      |
 | `spec.caBundleRef`  | ConfigMapKeySelector | A configmap with a CA bundle configured for the Metrics Operator controllers   |
 | `spec.versions`     | array                | The versions of Metrics Operator that can be installed                         |
 

@@ -33,6 +33,7 @@ import (
 
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
 	ctrlerrors "github.com/openmcp-project/controller-utils/pkg/errors"
+	"github.com/openmcp-project/extensibility-utils/pkg/tokenrefresh"
 	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider"
 	"github.com/openmcp-project/opencontrolplane-runtime/pkg/serviceprovider/clusteraccess"
 	libutils "github.com/openmcp-project/openmcp-operator/lib/utils"
@@ -160,12 +161,9 @@ func (r *MetricsOperatorReconciler) createObjectManager(ctx context.Context, obj
 	mgr.AddCluster(workloadCluster)
 	mgr.AddCluster(cpCluster)
 
-	metricsNamespace := cpCluster.GetDefaultNamespace()
-	if helmValues.NamespaceOverride != "" {
-		metricsNamespace = helmValues.NamespaceOverride
-	}
+	metricsNamespace := metricsOperatorNamespace(helmValues)
 
-	moVersion, authSecretsToKeep, err := setupAuth(pc, moVersion, workloadCluster, cpCluster, metricsNamespace)
+	moVersion, authSecretsToKeep, err := setupAuth(moVersion, workloadCluster, cpCluster, metricsNamespace)
 	if err != nil {
 		return nil, err
 	}
@@ -220,14 +218,52 @@ func (r *MetricsOperatorReconciler) prepareInputs(ctx context.Context, obj *apiv
 	return tenantNamespace, moVersion, helmValues, nil
 }
 
-func setupAuth(pc *apiv1alpha1.ProviderConfig, moVersion apiv1alpha1.MetricsOperatorVersion, workloadCluster, cpCluster resources.ManagedCluster, metricsNamespace string) (apiv1alpha1.MetricsOperatorVersion, []corev1.LocalObjectReference, error) {
-	cpServiceAccount := &authn.ManagedServiceAccount{
+// metricsOperatorNamespace returns the namespace of the metrics-operator on the ControlPlane cluster.
+func metricsOperatorNamespace(helmValues *helm.HelmValues) string {
+	if helmValues.NamespaceOverride != "" {
+		return helmValues.NamespaceOverride
+	}
+	return flux.DefaultNamespace
+}
+
+// CPServiceAccount returns the metrics-operator ServiceAccount in the given namespace on the ControlPlane cluster.
+func CPServiceAccount(metricsNamespace string) *authn.ManagedServiceAccount {
+	return &authn.ManagedServiceAccount{
 		NamespacedName: k8stypes.NamespacedName{
 			Name:      "metrics-operator-server",
 			Namespace: metricsNamespace,
 		},
 	}
-	cpServiceAccount.Configure(workloadCluster, cpCluster, pc.PollInterval())
+}
+
+// TokenBinding returns the token binding of a MetricsOperator for the token refresh controller.
+// The ServiceAccount namespace depends on the Helm values of the selected version, so the ProviderConfig
+// named providerName is read from the platform cluster.
+func (r *MetricsOperatorReconciler) TokenBinding(providerName string) tokenrefresh.BindingFunc[*apiv1alpha1.MetricsOperator] {
+	return func(ctx context.Context, obj *apiv1alpha1.MetricsOperator) (tokenrefresh.Binding, bool, error) {
+		// the instance namespace is known once the MetricsOperator controller has assigned the instance ID
+		if instance.GetID(obj) == "" {
+			return tokenrefresh.Binding{}, false, nil
+		}
+		pc := &apiv1alpha1.ProviderConfig{}
+		if err := r.PlatformCluster.Client().Get(ctx, k8stypes.NamespacedName{Name: providerName}, pc); err != nil {
+			return tokenrefresh.Binding{}, false, fmt.Errorf("failed to get provider config %s: %w", providerName, err)
+		}
+		moVersion, err := selectMetricsOperatorVersion(obj.Spec.Version, pc)
+		if err != nil {
+			return tokenrefresh.Binding{}, false, fmt.Errorf("failed to select metrics operator version: %w", err)
+		}
+		helmValues, err := helm.ExtractHelmValues(moVersion.HelmValues)
+		if err != nil {
+			return tokenrefresh.Binding{}, false, fmt.Errorf("failed to extract helm values: %w", err)
+		}
+		return CPServiceAccount(metricsOperatorNamespace(helmValues)).TokenBinding(instance.Namespace(obj)), true, nil
+	}
+}
+
+func setupAuth(moVersion apiv1alpha1.MetricsOperatorVersion, workloadCluster, cpCluster resources.ManagedCluster, metricsNamespace string) (apiv1alpha1.MetricsOperatorVersion, []corev1.LocalObjectReference, error) {
+	cpServiceAccount := CPServiceAccount(metricsNamespace)
+	cpServiceAccount.Configure(workloadCluster, cpCluster)
 
 	var err error
 	moVersion.HelmValues, err = helm.AddAuthToHelmValues(moVersion.HelmValues, cpCluster, cpServiceAccount.KubeAPIAccess())

@@ -3,18 +3,13 @@ package authn
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
-	"time"
 
-	"github.com/openmcp-project/controller-utils/pkg/clusters"
+	"github.com/openmcp-project/extensibility-utils/pkg/tokenrefresh"
 	"github.com/openmcp-project/service-provider-metrics-operator/pkg/metricsoperator/resources"
-	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -24,64 +19,10 @@ const (
 	serviceAccountMountPath = "/var/run/secrets/kubernetes.io/serviceaccount"
 	serviceAccountVolume    = "kube-api-access"
 
-	annotationTokenExpirationTime = "metrics-operator.services.openmcp.cloud/token-expiration-time"
+	// TokenServiceProvider is the service provider name used to build the token annotation keys,
+	// shared by the initial token write in Configure and the tokenrefresh controller.
+	TokenServiceProvider = "metrics-operator"
 )
-
-var (
-	errSANameOrNamespaceEmpty = errors.New("name or namespace in service account reference must not be empty")
-	errRestConfigNil          = errors.New("rest config must not be nil")
-	errExpirationInvalid      = errors.New("must not specify a duration less than 10 minutes")
-)
-
-type serviceAccountToken struct {
-	CAData      []byte
-	Token       string
-	TokenExpiry time.Time
-}
-
-// generateToken generates a token for the given ServiceAccount. If successful, it returns the token and
-// the actual lifetime of it, which might deviate from the desired lifetime.
-func generateToken(ctx context.Context, cp *clusters.Cluster, cfg *rest.Config, svcAccRef types.NamespacedName, expiration time.Duration) (*serviceAccountToken, error) {
-	if svcAccRef.Name == "" || svcAccRef.Namespace == "" {
-		return nil, errSANameOrNamespaceEmpty
-	}
-	if cfg == nil {
-		return nil, errRestConfigNil
-	}
-	if expiration < 10*time.Minute {
-		return nil, errExpirationInvalid
-	}
-
-	sa := &corev1.ServiceAccount{}
-	if err := cp.Client().Get(ctx, types.NamespacedName{Name: svcAccRef.Name, Namespace: svcAccRef.Namespace}, sa); err != nil {
-		return nil, err
-	}
-
-	req := &authenticationv1.TokenRequest{
-		Spec: authenticationv1.TokenRequestSpec{
-			ExpirationSeconds: new(int64(expiration.Seconds())),
-		},
-	}
-	if err := cp.Client().SubResource("token").Create(ctx, sa, req); err != nil {
-		return nil, err
-	}
-
-	rc := &serviceAccountToken{
-		Token:       req.Status.Token,
-		TokenExpiry: req.Status.ExpirationTimestamp.Time,
-		CAData:      cfg.CAData,
-	}
-
-	if cfg.CAFile != "" {
-		caBytes, err := os.ReadFile(cfg.CAFile)
-		if err != nil {
-			return nil, err
-		}
-		rc.CAData = caBytes
-	}
-
-	return rc, nil
-}
 
 // ManagedServiceAccount references the managed ServiceAccount object
 type ManagedServiceAccount struct {
@@ -90,6 +31,14 @@ type ManagedServiceAccount struct {
 
 func (m *ManagedServiceAccount) KubeAPIAccess() string {
 	return fmt.Sprintf("kube-api-access-%s", m.Name)
+}
+
+// TokenBinding returns the ServiceAccount and the token Secret in the given workload namespace for the token refresh controller.
+func (m *ManagedServiceAccount) TokenBinding(workloadNamespace string) tokenrefresh.Binding {
+	return tokenrefresh.Binding{
+		ServiceAccount: m.NamespacedName,
+		Secret:         types.NamespacedName{Name: m.KubeAPIAccess(), Namespace: workloadNamespace},
+	}
 }
 
 // AddCAToHelmValues removes conflicting volumes, volumeMounts and envVars (matching by name and/or mountPath) and
@@ -285,7 +234,7 @@ func unmarshalIfPresent(obj map[string]json.RawMessage, key string, out any) err
 }
 
 // Configure adds a managed ServiceAccount object to the given CP cluster and a managed Secret object to the given workload cluster.
-func (m *ManagedServiceAccount) Configure(workloadCluster, cpCluster resources.ManagedCluster, pollInterval time.Duration) {
+func (m *ManagedServiceAccount) Configure(workloadCluster, cpCluster resources.ManagedCluster) {
 	// Add a namespace on the CP cluster so the service account has a place to live.
 	ns := resources.NewManagedObject(&corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
@@ -332,48 +281,21 @@ func (m *ManagedServiceAccount) Configure(workloadCluster, cpCluster resources.M
 		DependsOn: []resources.ManagedObject{
 			msa,
 		},
+		// Mint the first token here so the Secret is never applied empty and crashloop until the tokenrefresh controller catches up.
 		ReconcileFunc: func(ctx context.Context, o client.Object) error {
-			oSecret := o.(*corev1.Secret)
-
-			// prevent token generation on every reconcile but at the same time consider the
-			// provider config poll interval and an additional safeguard of a minute (pod volume refresh delay)
-			// to make sure that the token is always refreshed in time.
-			// e.g. a user might not the update velero onboarding resource after its initial creation but
-			// the service still needs to refresh its token at least once per hour or more frequently
-			// in case the token is issued with an expiration time of less than an hour
-			nextReconcile := time.Now().Add(pollInterval).Add(time.Minute)
-			expirationTime, err := getTokenExpirationTime(oSecret)
-			if err != nil || expirationTime.Before(nextReconcile) {
-				rc, err := generateToken(ctx, cpCluster.GetCluster(), cpCluster.GetConfig(), m.NamespacedName, 1*time.Hour)
-				if err != nil {
-					return err
-				}
-				oSecret.Data = map[string][]byte{
-					"token":     []byte(rc.Token),
-					"namespace": []byte(cpCluster.GetDefaultNamespace()),
-					"ca.crt":    rc.CAData,
-				}
-				setTokenExpirationTime(oSecret, rc.TokenExpiry)
+			tokenSecret := o.(*corev1.Secret)
+			// if the token is already present for this ServiceAccount, don't overwrite it, the tokenrefresh controller will handle it.
+			// A token minted for a ServiceAccount in another namespace (e.g. after a namespaceOverride change) is replaced right away,
+			// because the ClusterRoleBinding no longer grants it any permissions.
+			if len(tokenSecret.Data[tokenrefresh.SecretKeyToken]) > 0 &&
+				string(tokenSecret.Data[tokenrefresh.SecretKeyNamespace]) == m.Namespace {
+				return nil
 			}
-
-			return nil
+			_, err := tokenrefresh.EnsureToken(ctx, cpCluster.GetCluster(), tokenSecret,
+				m.TokenBinding(workloadCluster.GetDefaultNamespace()), TokenServiceProvider, tokenrefresh.DefaultTokenLifetime)
+			return err
 		},
 		StatusFunc: resources.SimpleStatus,
 	})
 	workloadCluster.AddObject(secret)
-}
-
-func getTokenExpirationTime(obj *corev1.Secret) (time.Time, error) {
-	if obj.Annotations == nil {
-		return time.Time{}, errors.New("no expiration time set")
-	}
-	expirationTime := obj.Annotations[annotationTokenExpirationTime]
-	return time.Parse(time.RFC3339, expirationTime)
-}
-
-func setTokenExpirationTime(obj *corev1.Secret, expTime time.Time) {
-	if obj.Annotations == nil {
-		obj.Annotations = map[string]string{}
-	}
-	obj.Annotations[annotationTokenExpirationTime] = expTime.Format(time.RFC3339)
 }
