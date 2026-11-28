@@ -39,7 +39,7 @@ func TestMain(m *testing.M) {
 			{
 				Name: "kind",
 				// renovate: datasource=docker depName=ghcr.io/openmcp-project/images/cluster-provider-kind
-				Image: "ghcr.io/openmcp-project/images/cluster-provider-kind:v0.7.5",
+				Image: "ghcr.io/openmcp-project/images/cluster-provider-kind:v0.7.6",
 			},
 		},
 		ServiceProviders: []providers.ServiceProviderSetup{
